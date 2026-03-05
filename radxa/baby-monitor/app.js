@@ -8,6 +8,8 @@ const ZOOM_MIN = 1.0;
 const ZOOM_MAX = 3.4;
 const ZOOM_STEP = 0.2;
 let irEnabled = false;
+let lastBabyState = 'unknown';
+let alertDismissedForState = null;
 
 /* Elements */
 const stream = document.getElementById('stream');
@@ -22,6 +24,9 @@ const selMode = document.getElementById('sel-mode');
 const chkIR = document.getElementById('chk-ir');
 const btnOTA = document.getElementById('btn-ota');
 const settingsPanel = document.getElementById('settings-panel');
+const aiAlert = document.getElementById('ai-alert');
+const aiAlertText = document.getElementById('ai-alert-text');
+const aiAlertDismiss = document.getElementById('ai-alert-dismiss');
 
 /* Stream connection */
 function connectStream() {
@@ -122,6 +127,43 @@ stream.addEventListener('touchmove', (e) => {
     }
 }, { passive: false });
 
+/* AI alert popup */
+const AI_ALERTS = {
+    sleeping: { text: 'Baby appears to be sleeping', css: 'alert-sleeping' },
+    absent:   { text: 'Baby not detected in frame', css: 'alert-absent' },
+    alert:    { text: 'Alert: Check on baby!', css: 'alert-distress' },
+};
+
+function showAiAlert(state) {
+    const info = AI_ALERTS[state];
+    if (!info) return;
+    aiAlert.className = info.css;
+    aiAlertText.textContent = info.text;
+}
+
+function hideAiAlert() {
+    aiAlert.className = 'hidden';
+}
+
+function handleBabyState(state) {
+    if (state === lastBabyState) return;
+    lastBabyState = state;
+    /* New state — reset dismissal so popup can appear */
+    if (alertDismissedForState !== state) {
+        alertDismissedForState = null;
+    }
+    if (AI_ALERTS[state] && alertDismissedForState !== state) {
+        showAiAlert(state);
+    } else {
+        hideAiAlert();
+    }
+}
+
+aiAlertDismiss.addEventListener('click', () => {
+    alertDismissedForState = lastBabyState;
+    hideAiAlert();
+});
+
 /* Init */
 connectStream();
 
@@ -132,6 +174,9 @@ setInterval(async () => {
         if (resp.ok) {
             const data = await resp.json();
             document.getElementById('fw-version').textContent = data.version || 'v1.0.0';
+            if (data.ai && data.baby_state) {
+                handleBabyState(data.baby_state);
+            }
         }
     } catch (e) { /* ignore */ }
-}, 10000);
+}, 3000);
