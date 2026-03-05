@@ -19,6 +19,7 @@ Endpoints:
     POST /api/zoom         — {"action": "in" | "out" | "reset"}
     POST /api/ir           — {"state": "on" | "off" | "auto"}
     POST /api/mode         — {"mode": "full_aa" | "full_carplay" | ...}
+    POST /api/ai           — {"enabled": true | false}
 """
 
 import json
@@ -304,6 +305,18 @@ class BabyMonitorHandler(BaseHTTPRequestHandler):
                 return
             try:
                 resp = compositor_command(f"MODE {mode}")
+                self._send_json({"ok": True, "response": resp})
+            except RuntimeError as exc:
+                self._send_error_json(str(exc), 503)
+
+        elif path == "/api/ai":
+            enabled = body.get("enabled")
+            if enabled is None or not isinstance(enabled, bool):
+                self._send_error_json("'enabled' must be true or false")
+                return
+            cmd = "AI on" if enabled else "AI off"
+            try:
+                resp = compositor_command(cmd)
                 self._send_json({"ok": True, "response": resp})
             except RuntimeError as exc:
                 self._send_error_json(str(exc), 503)
