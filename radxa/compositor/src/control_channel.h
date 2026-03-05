@@ -18,8 +18,11 @@
  *   ZOOM reset              — camera zoom reset to 1.0×
  *   IR on                   — IR LEDs on (via GPIO)
  *   IR off                  — IR LEDs off
- *   IR auto                 — IR LEDs auto (ambient-light based, future)
- *   STATUS                  — reply: "mode zoom ir fps latency\n"
+ *   IR auto                 — IR LEDs auto (ambient-light based)
+ *   AI on                   — enable AI baby monitoring
+ *   AI off                  — disable AI baby monitoring
+ *   AI status               — reply: JSON with AI detection state
+ *   STATUS                  — reply: JSON with full system status (incl. AI)
  *
  * All commands are applied through the mode.h and camera.h APIs.
  * Callbacks for IR control are registered at init time.

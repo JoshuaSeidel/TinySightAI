@@ -52,6 +52,7 @@
 #include "aa_video_input.h"
 #include "aa_video_output.h"
 #include "ir_led.h"
+#include "baby_ai.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,8 +136,10 @@ static const uint8_t *process_video_frame(
 
     if (g_display.layout != LAYOUT_FULL_PRIMARY) {
         cam_idx = camera_dequeue(&g_camera, &cam_data, &cam_len);
-        if (cam_data)
+        if (cam_data) {
             ir_led_update(cam_data, g_camera.width, g_camera.height);
+            baby_ai_feed_frame(cam_data, g_camera.width, g_camera.height);
+        }
     }
 
     pipeline_composite(g_pipeline, g_display.layout,
@@ -297,6 +300,7 @@ static void *camera_only_thread(void *arg)
         }
 
         ir_led_update(cam_data, g_camera.width, g_camera.height);
+        baby_ai_feed_frame(cam_data, g_camera.width, g_camera.height);
 
         pthread_mutex_lock(&g_lock);
 
@@ -418,6 +422,12 @@ int main(int argc, char *argv[])
     if (ir_led_init(IR_LED_GPIO) < 0)
         fprintf(stderr, "WARNING: IR LED GPIO init failed — dry-run mode\n");
 
+    /* Initialise AI baby monitoring (non-fatal if model not available) */
+    if (baby_ai_init(NULL) < 0)
+        fprintf(stderr, "WARNING: AI init failed — AI features disabled\n");
+    else
+        baby_ai_start();
+
     /*
      * Initialise control channel.
      * Listens on TCP 5290 and /tmp/compositor-control.sock.
@@ -484,6 +494,7 @@ int main(int argc, char *argv[])
 
     /* Tear down remaining resources */
     control_destroy();
+    baby_ai_destroy();
     ir_led_destroy();
     pipeline_destroy(g_pipeline);
     camera_close(&g_camera);

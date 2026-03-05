@@ -18,6 +18,7 @@
  * automatically if aa-proxy restarts.
  */
 #include "control_channel.h"
+#include "baby_ai.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -314,26 +315,55 @@ static void dispatch_command(const char *cmd, int reply_fd)
             snprintf(reply, sizeof(reply), "OK ir=%s\n", ir_name(g_ir_state));
         }
 
+    } else if (strncmp(cmd, "AI ", 3) == 0) {
+        const char *arg = cmd + 3;
+
+        if (strcmp(arg, "on") == 0) {
+            baby_ai_set_enabled(true);
+            snprintf(reply, sizeof(reply), "OK ai=on\n");
+        } else if (strcmp(arg, "off") == 0) {
+            baby_ai_set_enabled(false);
+            snprintf(reply, sizeof(reply), "OK ai=off\n");
+        } else if (strcmp(arg, "status") == 0) {
+            baby_ai_status_t ai = baby_ai_get_status();
+            const char *state_names[] = {
+                "unknown", "absent", "awake", "sleeping", "alert"
+            };
+            const char *sname = (ai.state >= 0 && ai.state <= 4)
+                                ? state_names[ai.state] : "unknown";
+            snprintf(reply, sizeof(reply),
+                     "{\"ai_enabled\":%s,\"baby_state\":\"%s\","
+                     "\"confidence\":%.2f,\"motion\":%.2f,"
+                     "\"face_visible\":%s}\n",
+                     baby_ai_is_enabled() ? "true" : "false",
+                     sname, ai.confidence, ai.motion_level,
+                     ai.face_visible ? "true" : "false");
+        } else {
+            snprintf(reply, sizeof(reply), "ERR unknown AI arg: %s\n", arg);
+        }
+
     } else if (strcmp(cmd, "STATUS") == 0) {
         pthread_mutex_lock(g_lock);
         /*
          * Reply with JSON so that server.py can json.loads() the response
-         * directly.  Format matches the dict expected by get_status_from_compositor():
-         *   {"mode":"<layout>","source":"<aa|carplay>","zoom":<int_pct>,
-         *    "ir":"<on|off|auto>","fps":30,"camera":true}
-         *
-         * zoom is returned as an integer percentage (100 = 1.0x) so that the
-         * JSON does not require float parsing on the Python side.
-         * fps and camera are static hints — the compositor always targets 30 fps
-         * and the camera is always present after successful init.
+         * directly.  Includes AI status for the web UI.
          */
+        baby_ai_status_t ai = baby_ai_get_status();
+        const char *state_names[] = {
+            "unknown", "absent", "awake", "sleeping", "alert"
+        };
+        const char *ai_state = (ai.state >= 0 && ai.state <= 4)
+                                ? state_names[ai.state] : "unknown";
         snprintf(reply, sizeof(reply),
                  "{\"mode\":\"%s\",\"source\":\"%s\",\"zoom\":%d,"
-                 "\"ir\":\"%s\",\"fps\":30,\"camera\":true}\n",
+                 "\"ir\":\"%s\",\"ai\":%s,\"baby_state\":\"%s\","
+                 "\"motion\":%.2f,\"fps\":30,\"camera\":true}\n",
                  layout_name(g_display->layout),
                  source_name(g_display->source),
                  (int)(g_display->cam_zoom * 100 + 0.5f),
-                 ir_name(g_ir_state));
+                 ir_name(g_ir_state),
+                 baby_ai_is_enabled() ? "true" : "false",
+                 ai_state, ai.motion_level);
         pthread_mutex_unlock(g_lock);
 
     } else {

@@ -19,6 +19,7 @@
  *             offset width × height
  */
 #include "overlay.h"
+#include "baby_ai.h"
 #include "touch.h"      /* BTN_MODE_X/Y, BTN_ZOOM_IN_X/Y, etc. */
 
 #include <stdlib.h>
@@ -43,6 +44,12 @@ typedef struct {
 static icon_buf_t g_icon_mode;    /* ⊞  grid */
 static icon_buf_t g_icon_zoom_in; /* circle + cross */
 static icon_buf_t g_icon_zoom_out;/* circle + minus */
+
+/* AI status indicator icons — small filled circle, color-coded */
+static icon_buf_t g_icon_ai_ok;      /* green — baby detected, OK */
+static icon_buf_t g_icon_ai_sleep;   /* blue  — baby sleeping */
+static icon_buf_t g_icon_ai_alert;   /* red   — alert condition */
+static icon_buf_t g_icon_ai_absent;  /* grey  — no baby detected */
 
 /* ---- RGBA drawing helpers ---- */
 
@@ -184,6 +191,34 @@ static void render_zoom_out_icon(void)
                    r, g2, b, a);
 }
 
+/*
+ * AI status indicators: small filled circles (12px radius) with color coding.
+ * Drawn at top-left corner of the frame.
+ *   Green  = baby detected, awake, all OK
+ *   Blue   = baby sleeping
+ *   Red    = alert (face covered, high motion, distress)
+ *   Grey   = no baby detected / AI off
+ */
+static void render_ai_indicator(icon_buf_t *icon,
+                                 uint8_t r, uint8_t g, uint8_t b)
+{
+    rgba_clear(icon);
+    /* Dark background */
+    rgba_fill_rect(icon, 0, 0, OVERLAY_ICON_W, OVERLAY_ICON_H,
+                   0, 0, 0, OVERLAY_BG_ALPHA);
+    /* Filled circle indicator */
+    rgba_fill_circle(icon, OVERLAY_ICON_W / 2, OVERLAY_ICON_H / 2,
+                     12, r, g, b, 230);
+}
+
+static void render_ai_icons(void)
+{
+    render_ai_indicator(&g_icon_ai_ok,     0, 200, 0);    /* green */
+    render_ai_indicator(&g_icon_ai_sleep,  60, 120, 255);  /* blue */
+    render_ai_indicator(&g_icon_ai_alert,  255, 40, 40);   /* red */
+    render_ai_indicator(&g_icon_ai_absent, 128, 128, 128); /* grey */
+}
+
 /* ---- NV12 blending ---- */
 
 /*
@@ -278,6 +313,7 @@ int overlay_init(void)
     render_mode_icon();
     render_zoom_in_icon();
     render_zoom_out_icon();
+    render_ai_icons();
     printf("overlay: icons pre-rendered (%dx%d px each)\n",
            OVERLAY_ICON_W, OVERLAY_ICON_H);
     return 0;
@@ -336,6 +372,25 @@ void overlay_render(uint8_t *frame_data, int frame_w, int frame_h,
         blit_icon(frame_data, frame_w, frame_h,
                   &g_icon_zoom_out, zo_ox, zo_oy);
     }
+
+    /* AI status indicator — top-left corner, only when AI is enabled
+     * and camera is visible */
+    if (baby_ai_is_enabled() && layout != LAYOUT_FULL_PRIMARY) {
+        int ai_ox = OVERLAY_MARGIN;
+        int ai_oy = OVERLAY_MARGIN;
+        const icon_buf_t *ai_icon;
+
+        baby_ai_status_t ai = baby_ai_get_status();
+        switch (ai.state) {
+        case BABY_STATE_AWAKE:   ai_icon = &g_icon_ai_ok;     break;
+        case BABY_STATE_SLEEPING:ai_icon = &g_icon_ai_sleep;  break;
+        case BABY_STATE_ALERT:   ai_icon = &g_icon_ai_alert;  break;
+        case BABY_STATE_ABSENT:  ai_icon = &g_icon_ai_absent; break;
+        default:                 ai_icon = &g_icon_ai_absent; break;
+        }
+
+        blit_icon(frame_data, frame_w, frame_h, ai_icon, ai_ox, ai_oy);
+    }
 }
 
 void overlay_destroy(void)
@@ -345,5 +400,9 @@ void overlay_destroy(void)
     memset(&g_icon_mode,     0, sizeof(g_icon_mode));
     memset(&g_icon_zoom_in,  0, sizeof(g_icon_zoom_in));
     memset(&g_icon_zoom_out, 0, sizeof(g_icon_zoom_out));
+    memset(&g_icon_ai_ok,    0, sizeof(g_icon_ai_ok));
+    memset(&g_icon_ai_sleep, 0, sizeof(g_icon_ai_sleep));
+    memset(&g_icon_ai_alert, 0, sizeof(g_icon_ai_alert));
+    memset(&g_icon_ai_absent,0, sizeof(g_icon_ai_absent));
     printf("overlay: destroyed\n");
 }
