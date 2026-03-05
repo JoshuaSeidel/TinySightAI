@@ -14,14 +14,20 @@
                 <div id="status-bar">
                     <span id="status-indicator"></span>
                     <span id="status-text">Connecting...</span>
+                    <span id="mode-label"></span>
                     <span id="zoom-level">1.0x</span>
                 </div>
                 <div id="controls">
                     <button id="btn-zoom-out" title="Zoom Out">-</button>
                     <button id="btn-zoom-in" title="Zoom In">+</button>
                     <button id="btn-ir" title="Toggle IR LEDs">IR</button>
-                    <button id="btn-mode" title="Cycle Display Mode">&#8862;</button>
+                    <button id="btn-mode" title="Settings">&#8862;</button>
                 </div>
+            </div>
+            <div id="ai-alert" class="hidden">
+                <div id="ai-alert-icon"></div>
+                <div id="ai-alert-text"></div>
+                <button id="ai-alert-dismiss" title="Dismiss">&times;</button>
             </div>
         </div>
         <div id="settings-panel" class="hidden">
@@ -40,6 +46,13 @@
                 <label>IR Night Vision</label>
                 <label class="toggle">
                     <input type="checkbox" id="chk-ir">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>AI Baby Detection</label>
+                <label class="toggle">
+                    <input type="checkbox" id="chk-ai" checked>
                     <span class="slider"></span>
                 </label>
             </div>
