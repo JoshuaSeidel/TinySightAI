@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AADongle</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; max-width: 600px; margin: 0 auto; }
+h1 { font-size: 1.4em; margin-bottom: 16px; color: #58a6ff; }
+h2 { font-size: 1.1em; margin: 16px 0 8px; color: #8b949e; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+nav { margin-bottom: 20px; display: flex; gap: 8px; }
+nav a { color: #58a6ff; text-decoration: none; padding: 6px 14px; border: 1px solid #30363d; border-radius: 6px; font-size: 0.85em; }
+nav a.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { text-align: center; }
+.stat .value { font-size: 1.5em; font-weight: 600; color: #58a6ff; }
+.stat .label { font-size: 0.75em; color: #8b949e; margin-top: 2px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+td { padding: 4px 8px; border-bottom: 1px solid #21262d; }
+td:first-child { width: 55%; }
+.footer { text-align: center; margin-top: 24px; font-size: 0.7em; color: #484f58; }
+</style>
+</head>
+<body>
+
+<h1>AADongle</h1>
+
+<nav>
+  <a href="/" class="active">Dashboard</a>
+  <a href="/config">Config</a>
+  <a href="/ota">OTA</a>
+</nav>
+
+<h2>System</h2>
+<div class="card stats">
+  <div class="stat">
+    <div class="value">{{uptime}}</div>
+    <div class="label">Uptime</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ram_used}}/{{ram_total}}MB</div>
+    <div class="label">RAM ({{ram_percent}}%)</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{cpu_temp}}&deg;C</div>
+    <div class="label">CPU Temp</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{disk_used}}/{{disk_total}}</div>
+    <div class="label">Disk ({{disk_percent}})</div>
+  </div>
+</div>
+
+<h2>Network</h2>
+<div class="card">
+  <table>
+    <tr><td>WiFi SSID</td><td>{{wifi_ssid}}</td></tr>
+    <tr><td>Connected Clients</td><td>{{clients}}</td></tr>
+    <tr><td>Display Mode</td><td>{{display_mode}}</td></tr>
+  </table>
+</div>
+
+<h2>Services</h2>
+<div class="card">
+  <table>
+    {{services_table}}
+  </table>
+</div>
+
+<div class="footer">AADongle v{{version}}</div>
+
+</body>
+</html>

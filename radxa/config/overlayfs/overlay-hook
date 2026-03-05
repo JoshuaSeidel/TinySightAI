@@ -1,0 +1,13 @@
+#!/bin/sh
+# /etc/initramfs-tools/hooks/overlay-root
+#
+# Initramfs hook to ensure the overlay kernel module is available.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# overlay is built-in on most kernels, but load it just in case
+manual_add_modules overlay

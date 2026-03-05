@@ -1,0 +1,24 @@
+[Unit]
+Description=Video Compositor (RGA + MPP)
+# Only need hostapd up — compositor listens on Unix sockets
+After=hostapd.service
+Wants=hostapd.service
+
+[Service]
+Type=simple
+ExecStart=/opt/aadongle/bin/compositor
+Restart=always
+RestartSec=1
+User=root
+Environment=DISPLAY_MODE=full_aa
+
+# Performance: pin to big cores, high priority
+Nice=-10
+LimitNOFILE=4096
+MemoryMax=512M
+
+# Fast ready detection
+TimeoutStartSec=10
+
+[Install]
+WantedBy=aadongle.target

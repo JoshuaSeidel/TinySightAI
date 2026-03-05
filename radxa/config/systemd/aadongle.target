@@ -1,0 +1,7 @@
+[Unit]
+Description=AADongle Core Services
+After=basic.target
+Wants=aa-bridge.service aa-proxy.service carplay.service baby-monitor.service bt-agent.service ir-leds.service config-server.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=IR LEDs for Night Vision
+# No dependencies — GPIO is available immediately
+DefaultDependencies=no
+After=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/gpioset gpiochip0 124=1
+ExecStop=/usr/bin/gpioset gpiochip0 124=0
+
+[Install]
+WantedBy=aadongle.target

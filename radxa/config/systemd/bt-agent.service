@@ -1,0 +1,13 @@
+[Unit]
+Description=Bluetooth Pairing Agent
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/aadongle/bin/bt-agent.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=aadongle.target

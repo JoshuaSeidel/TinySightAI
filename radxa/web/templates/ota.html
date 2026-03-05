@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AADongle — OTA Update</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; max-width: 600px; margin: 0 auto; }
+h1 { font-size: 1.4em; margin-bottom: 16px; color: #58a6ff; }
+h2 { font-size: 1.1em; margin: 16px 0 8px; color: #8b949e; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+nav { margin-bottom: 20px; display: flex; gap: 8px; }
+nav a { color: #58a6ff; text-decoration: none; padding: 6px 14px; border: 1px solid #30363d; border-radius: 6px; font-size: 0.85em; }
+nav a.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+td { padding: 6px 8px; border-bottom: 1px solid #21262d; }
+td:first-child { color: #8b949e; width: 45%; }
+button, .btn {
+  display: inline-block; margin-top: 12px; padding: 8px 16px;
+  background: #238636; color: #fff; border: none; border-radius: 6px;
+  font-size: 0.85em; cursor: pointer; text-decoration: none;
+}
+button:hover, .btn:hover { background: #2ea043; }
+.btn-danger { background: #da3633; }
+.btn-danger:hover { background: #f85149; }
+.btn-secondary { background: #30363d; }
+.btn-secondary:hover { background: #484f58; }
+input[type="file"] {
+  display: block; width: 100%; margin: 8px 0; padding: 8px;
+  background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+  color: #e6edf3; font-size: 0.85em;
+}
+.note { font-size: 0.75em; color: #484f58; margin-top: 4px; }
+.success { background: #1a7f37; color: #fff; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85em; }
+#check-result { margin-top: 12px; font-size: 0.85em; }
+.footer { text-align: center; margin-top: 24px; font-size: 0.7em; color: #484f58; }
+</style>
+</head>
+<body>
+
+<h1>AADongle</h1>
+
+<nav>
+  <a href="/">Dashboard</a>
+  <a href="/config">Config</a>
+  <a href="/ota" class="active">OTA</a>
+</nav>
+
+<script>
+if (location.search.includes("uploaded=1")) {
+  document.write('<div class="success">Firmware uploaded successfully.</div>');
+}
+</script>
+
+<h2>Current Version</h2>
+<div class="card">
+  <table>
+    <tr><td>System Version</td><td>v{{version}}</td></tr>
+    <tr><td>Dongle FW Staged</td><td>{{dongle_staged}}</td></tr>
+    <tr><td>Brain FW Staged</td><td>{{brain_staged}}</td></tr>
+  </table>
+</div>
+
+<h2>Check for Updates</h2>
+<div class="card">
+  <button type="button" class="btn-secondary" onclick="checkUpdates()">Check Remote Server</button>
+  <div id="check-result"></div>
+</div>
+
+<h2>Upload Firmware</h2>
+<div class="card">
+  <form method="POST" action="/ota/upload" enctype="multipart/form-data">
+    <p class="note">Upload a .bin (T-Dongle) or .tar.gz (Brain) firmware file.</p>
+    <input type="file" name="firmware" accept=".bin,.tar.gz" required>
+    <button type="submit">Upload Firmware</button>
+  </form>
+</div>
+
+<h2>System</h2>
+<div class="card">
+  <button type="button" class="btn-danger" onclick="confirmReboot()">Reboot Device</button>
+  <p class="note">Services will restart automatically after reboot.</p>
+</div>
+
+<div class="footer">AADongle v{{version}}</div>
+
+<script>
+async function checkUpdates() {
+  const el = document.getElementById('check-result');
+  el.textContent = 'Checking...';
+  try {
+    const resp = await fetch('/ota/check', {method: 'POST'});
+    const data = await resp.json();
+    if (data.available) {
+      el.innerHTML = '<span style="color:#3fb950">Updates available: ' + JSON.stringify(data.updates) + '</span>';
+    } else {
+      el.innerHTML = '<span style="color:#8b949e">No updates available. ' + (data.reason || '') + '</span>';
+    }
+  } catch (e) {
+    el.innerHTML = '<span style="color:#f85149">Error: ' + e.message + '</span>';
+  }
+}
+
+function confirmReboot() {
+  if (confirm('Reboot the device? Active connections will be dropped.')) {
+    fetch('/api/reboot', {method: 'POST'}).then(() => {
+      document.body.innerHTML = '<h1 style="text-align:center;margin-top:40vh;color:#58a6ff">Rebooting...</h1>';
+    });
+  }
+}
+</script>
+
+</body>
+</html>

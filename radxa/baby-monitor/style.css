@@ -1,0 +1,186 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #111;
+    color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+}
+
+#app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#video-container {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+}
+
+#stream {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+#overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+}
+
+#status-bar {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+#status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #f44;
+}
+
+#status-indicator.connected {
+    background: #4f4;
+}
+
+#zoom-level {
+    margin-left: auto;
+    background: rgba(0,0,0,0.6);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+#controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+    pointer-events: auto;
+}
+
+#controls button {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.4);
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#controls button:active {
+    background: rgba(255,255,255,0.2);
+}
+
+#controls button.active {
+    border-color: #f0f;
+    color: #f0f;
+}
+
+/* Settings panel */
+.hidden { display: none !important; }
+
+#settings-panel {
+    background: #1a1a1a;
+    padding: 16px;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
+#settings-panel h3 {
+    margin-bottom: 12px;
+    font-size: 16px;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #333;
+}
+
+.setting-row label {
+    font-size: 14px;
+}
+
+.setting-row select {
+    background: #333;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+button.small {
+    background: #333;
+    color: #eee;
+    border: 1px solid #555;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+/* Toggle switch */
+.toggle {
+    position: relative;
+    width: 48px;
+    height: 26px;
+}
+
+.toggle input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #444;
+    border-radius: 13px;
+    transition: 0.3s;
+}
+
+.slider::before {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    left: 3px;
+    bottom: 3px;
+    background: #eee;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+
+.toggle input:checked + .slider { background: #4CAF50; }
+.toggle input:checked + .slider::before { transform: translateX(22px); }

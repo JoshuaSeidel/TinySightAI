@@ -1,0 +1,16 @@
+[Unit]
+Description=Android Auto Proxy
+# Needs WiFi AP + DHCP for T-Dongle to connect
+After=hostapd.service dnsmasq.service
+Wants=aa-bridge.service
+
+[Service]
+Type=simple
+ExecStart=/opt/aadongle/bin/aa-proxy
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=1
+Nice=-5
+
+[Install]
+WantedBy=aadongle.target

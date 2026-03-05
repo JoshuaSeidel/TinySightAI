@@ -1,0 +1,47 @@
+#!/bin/sh
+# /etc/initramfs-tools/scripts/init-bottom/overlay-root
+#
+# Sets up an overlayfs on top of the read-only root filesystem.
+# All writes go to tmpfs (RAM) — survives hard power cuts with zero corruption.
+# Pass "disable_overlayfs" on kernel cmdline to bypass (for maintenance).
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+
+. /scripts/functions
+
+# Check for disable flag on kernel cmdline
+for x in $(cat /proc/cmdline); do
+    case $x in
+        disable_overlayfs)
+            log_warning_msg "overlayfs disabled via cmdline"
+            exit 0
+            ;;
+    esac
+done
+
+log_begin_msg "Setting up overlay root filesystem"
+
+# Allocate tmpfs for overlay (128M of 1GB RAM — plenty for runtime writes)
+mkdir -p /mnt/overlay
+mount -t tmpfs tmpfs /mnt/overlay -o size=128M,mode=0755
+
+mkdir -p /mnt/overlay/upper
+mkdir -p /mnt/overlay/work
+
+# Move the real (read-only) root aside
+mkdir -p /mnt/overlay/lower
+mount --move "${rootmnt}" /mnt/overlay/lower
+
+# Stack overlayfs: lower=real root (ro), upper=tmpfs (rw)
+mount -t overlay overlay \
+    -o lowerdir=/mnt/overlay/lower,upperdir=/mnt/overlay/upper,workdir=/mnt/overlay/work \
+    "${rootmnt}"
+
+# Make overlay internals accessible inside the new root
+# (useful for diagnostics: ls /overlay/upper shows all changed files)
+mkdir -p "${rootmnt}/overlay"
+mount --move /mnt/overlay "${rootmnt}/overlay"
+
+log_end_msg

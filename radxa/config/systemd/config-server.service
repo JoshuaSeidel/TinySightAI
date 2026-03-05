@@ -1,0 +1,13 @@
+[Unit]
+Description=AADongle Config & OTA Web Interface
+After=hostapd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/aadongle/web/config_server.py
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=aadongle.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Baby Monitor API
+# Non-critical — can start late
+After=aa-bridge.service hostapd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/aadongle/baby-monitor/server.py
+WorkingDirectory=/opt/aadongle/baby-monitor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=aadongle.target

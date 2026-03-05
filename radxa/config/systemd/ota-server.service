@@ -1,0 +1,15 @@
+[Unit]
+Description=OTA Update Server
+# Least critical — start last
+After=aadongle.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/aadongle/ota-server/ota_server.py
+Restart=always
+RestartSec=10
+User=root
+Environment=OTA_UPDATE_URL=https://updates.aadongle.local
+
+[Install]
+WantedBy=multi-user.target

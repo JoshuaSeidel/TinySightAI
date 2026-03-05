@@ -1,0 +1,14 @@
+[Unit]
+Description=CarPlay Stack (iAP2 + AirPlay)
+# Needs Bluetooth for phone discovery
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/opt/aadongle/bin/carplay-stack
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=aadongle.target

@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "usb_bridge.c"
+        "wifi_sta.c"
+        "tcp_tunnel.c"
+        "ble_control.c"
+        "led_status.c"
+        "ota_update.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        driver
+        esp_wifi
+        esp_event
+        nvs_flash
+        tinyusb
+        bt
+        esp_timer
+        lwip
+        esp_http_client
+        app_update
+        mbedtls
+)

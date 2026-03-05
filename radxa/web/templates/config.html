@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AADongle — Config</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; max-width: 600px; margin: 0 auto; }
+h1 { font-size: 1.4em; margin-bottom: 16px; color: #58a6ff; }
+h2 { font-size: 1.1em; margin: 16px 0 8px; color: #8b949e; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px; }
+nav { margin-bottom: 20px; display: flex; gap: 8px; }
+nav a { color: #58a6ff; text-decoration: none; padding: 6px 14px; border: 1px solid #30363d; border-radius: 6px; font-size: 0.85em; }
+nav a.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+label { display: block; font-size: 0.85em; color: #8b949e; margin-bottom: 4px; margin-top: 12px; }
+label:first-child { margin-top: 0; }
+input[type="text"], input[type="password"], input[type="number"], select {
+  width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d;
+  border-radius: 6px; color: #e6edf3; font-size: 0.9em;
+}
+input[type="range"] { width: 100%; margin-top: 4px; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.checkbox-row input { width: auto; }
+.checkbox-row label { margin: 0; }
+button {
+  display: block; width: 100%; margin-top: 16px; padding: 10px;
+  background: #238636; color: #fff; border: none; border-radius: 6px;
+  font-size: 0.95em; cursor: pointer; font-weight: 600;
+}
+button:hover { background: #2ea043; }
+.note { font-size: 0.75em; color: #484f58; margin-top: 4px; }
+.saved { background: #1a7f37; color: #fff; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85em; }
+.footer { text-align: center; margin-top: 24px; font-size: 0.7em; color: #484f58; }
+</style>
+</head>
+<body>
+
+<h1>AADongle</h1>
+
+<nav>
+  <a href="/">Dashboard</a>
+  <a href="/config" class="active">Config</a>
+  <a href="/ota">OTA</a>
+</nav>
+
+<script>
+if (location.search.includes("saved=1")) {
+  document.write('<div class="saved">Configuration saved. WiFi changes take effect on next boot.</div>');
+}
+</script>
+
+<form method="POST" action="/config">
+
+<h2>WiFi Access Point</h2>
+<div class="card">
+  <label for="wifi_ssid">SSID</label>
+  <input type="text" id="wifi_ssid" name="wifi_ssid" value="{{wifi_ssid}}">
+
+  <label for="wifi_password">Password</label>
+  <input type="password" id="wifi_password" name="wifi_password" value="{{wifi_password}}">
+
+  <label for="wifi_channel">Channel</label>
+  <input type="number" id="wifi_channel" name="wifi_channel" value="{{wifi_channel}}" min="36" max="165">
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="wifi_hidden" name="wifi_hidden" {{wifi_hidden_checked}}>
+    <label for="wifi_hidden">Hidden SSID</label>
+  </div>
+  <p class="note">WiFi changes require reboot to take effect.</p>
+</div>
+
+<h2>Display</h2>
+<div class="card">
+  <label for="display_mode">Default Mode</label>
+  <select id="display_mode" name="display_mode">
+    <option value="full_aa" {{mode_full_aa}}>Full Android Auto</option>
+    <option value="full_carplay" {{mode_full_cp}}>Full CarPlay</option>
+    <option value="full_camera" {{mode_full_cam}}>Full Camera</option>
+    <option value="split_aa_cam" {{mode_split_aa}}>Split: AA + Camera</option>
+    <option value="split_cp_cam" {{mode_split_cp}}>Split: CarPlay + Camera</option>
+  </select>
+  <p class="note">Applied immediately to compositor.</p>
+</div>
+
+<h2>IR LEDs (Night Vision)</h2>
+<div class="card">
+  <label for="ir_led_mode">Mode</label>
+  <select id="ir_led_mode" name="ir_led_mode">
+    <option value="auto" {{ir_auto}}>Auto (ambient light sensor)</option>
+    <option value="on" {{ir_on}}>Always On</option>
+    <option value="off" {{ir_off}}>Off</option>
+  </select>
+
+  <label for="ir_led_brightness">Brightness ({{ir_led_brightness}}%)</label>
+  <input type="range" id="ir_led_brightness" name="ir_led_brightness" value="{{ir_led_brightness}}" min="0" max="100">
+</div>
+
+<button type="submit">Save Configuration</button>
+
+</form>
+
+<div class="footer">Changes to display mode and IR LEDs are applied immediately.</div>
+
+</body>
+</html>

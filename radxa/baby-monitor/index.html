@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Baby Monitor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <div id="video-container">
+            <img id="stream" src="/stream" alt="Baby Camera">
+            <div id="overlay">
+                <div id="status-bar">
+                    <span id="status-indicator"></span>
+                    <span id="status-text">Connecting...</span>
+                    <span id="zoom-level">1.0x</span>
+                </div>
+                <div id="controls">
+                    <button id="btn-zoom-out" title="Zoom Out">-</button>
+                    <button id="btn-zoom-in" title="Zoom In">+</button>
+                    <button id="btn-ir" title="Toggle IR LEDs">IR</button>
+                    <button id="btn-mode" title="Cycle Display Mode">&#8862;</button>
+                </div>
+            </div>
+        </div>
+        <div id="settings-panel" class="hidden">
+            <h3>Settings</h3>
+            <div class="setting-row">
+                <label>Display Mode</label>
+                <select id="sel-mode">
+                    <option value="0">Full Android Auto</option>
+                    <option value="1">Full CarPlay</option>
+                    <option value="2">Full Baby Cam</option>
+                    <option value="3">Split: AA + Cam</option>
+                    <option value="4">Split: CarPlay + Cam</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label>IR Night Vision</label>
+                <label class="toggle">
+                    <input type="checkbox" id="chk-ir">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Firmware</label>
+                <span id="fw-version">v1.0.0</span>
+                <button id="btn-ota" class="small">Check Update</button>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
