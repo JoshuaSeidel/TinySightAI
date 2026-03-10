@@ -76,7 +76,7 @@ static void read_system_mac(char *out_mac, size_t out_len)
 {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        strncpy(out_mac, "AA:BB:CC:DD:EE:FF", out_len - 1);
+        snprintf(out_mac, out_len, "%s", "AA:BB:CC:DD:EE:FF");
         return;
     }
 
@@ -99,7 +99,7 @@ static void read_system_mac(char *out_mac, size_t out_len)
     close(sock);
 
     if (!found) {
-        strncpy(out_mac, "AA:BB:CC:DD:EE:FF", out_len - 1);
+        snprintf(out_mac, out_len, "%s", "AA:BB:CC:DD:EE:FF");
     }
 }
 

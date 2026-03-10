@@ -267,8 +267,8 @@ airplay_mdns_ctx_t *airplay_mdns_register(const char *mac,
     airplay_mdns_ctx_t *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return NULL;
 
-    strncpy(ctx->mac, mac ? mac : "AA:BB:CC:DD:EE:FF", sizeof(ctx->mac) - 1);
-    strncpy(ctx->service_name, name ? name : "CarPlay", sizeof(ctx->service_name) - 1);
+    snprintf(ctx->mac, sizeof(ctx->mac), "%s", mac ? mac : "AA:BB:CC:DD:EE:FF");
+    snprintf(ctx->service_name, sizeof(ctx->service_name), "%s", name ? name : "CarPlay");
     memcpy(ctx->ed25519_pub, ed25519_pub, 32);
     ctx->port    = port;
     ctx->running = 1;

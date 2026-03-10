@@ -24,8 +24,8 @@
  *   SIGINT / SIGTERM — clean shutdown: stop AirPlay, cleanup BT, close MFi.
  *
  * Build:
- *   gcc -o carplay_daemon main.c mfi/mfi_auth.c iap2/*.c airplay/*.c \
- *       -lbluetooth -lpthread -lm
+ *   gcc -o carplay_daemon main.c mfi/mfi_auth.c iap2/ airplay/ \
+ *       -lbluetooth -lpthread -lm  (see Makefile for full source list)
  */
 
 #include <stdio.h>

@@ -311,7 +311,7 @@ static int ed25519_sign(const uint8_t priv[64],
  * Verify Ed25519 signature.
  * Returns 0 on success, -1 on failure.
  */
-static int ed25519_verify(const uint8_t pub[32],
+static int __attribute__((unused)) ed25519_verify(const uint8_t pub[32],
                            const uint8_t *msg, size_t msg_len,
                            const uint8_t sig[64])
 {
@@ -418,7 +418,7 @@ fail:
  * Input must be ciphertext + 16-byte tag at the end.
  * in_len includes the 16-byte tag.
  */
-static int aes128gcm_decrypt(const uint8_t key[16], const uint8_t nonce[12],
+static int __attribute__((unused)) aes128gcm_decrypt(const uint8_t key[16], const uint8_t nonce[12],
                                const uint8_t *in, size_t in_len,
                                uint8_t *out, size_t *out_len)
 {

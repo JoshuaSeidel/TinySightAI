@@ -680,6 +680,17 @@ static int rtsp_dispatch(airplay_rtsp_session_t *sess,
     return rtsp_ok(fd, req->cseq);
 }
 
+/* Adapter shim: mirror callback has codec param, video callback doesn't */
+static void rtsp_mirror_video_shim(const uint8_t *data, size_t len,
+                                    uint64_t timestamp_us,
+                                    mirror_codec_t codec, void *ctx)
+{
+    (void)codec;
+    airplay_rtsp_session_t *sess = ctx;
+    if (sess->video_cb)
+        sess->video_cb(data, len, timestamp_us, sess->cb_ctx);
+}
+
 /* -----------------------------------------------------------------------
  * Public API
  * ----------------------------------------------------------------------- */
@@ -696,10 +707,10 @@ int rtsp_session_init(airplay_rtsp_session_t *sess,
     sess->state   = RTSP_STATE_IDLE;
     sess->rtsp_fd = -1;
 
-    strncpy(sess->device_mac,  mac         ? mac         : "AA:BB:CC:DD:EE:FF",
-            sizeof(sess->device_mac)  - 1);
-    strncpy(sess->device_name, device_name ? device_name : "CarPlay",
-            sizeof(sess->device_name) - 1);
+    snprintf(sess->device_mac,  sizeof(sess->device_mac),  "%s",
+             mac         ? mac         : "AA:BB:CC:DD:EE:FF");
+    snprintf(sess->device_name, sizeof(sess->device_name), "%s",
+             device_name ? device_name : "CarPlay");
 
     sess->video_cb  = video_cb;
     sess->audio_cb  = audio_cb;
@@ -712,10 +723,10 @@ int rtsp_session_init(airplay_rtsp_session_t *sess,
     /* Init FairPlay context */
     if (fairplay_ctx_init(&sess->fairplay) < 0) return -1;
 
-    /* Init mirror context */
+    /* Init mirror context — wrap video callback to match mirror_video_cb_t */
     if (airplay_mirror_ctx_init(&sess->mirror,
-                                  (mirror_video_cb_t)video_cb,
-                                  cb_ctx) < 0) return -1;
+                                  rtsp_mirror_video_shim,
+                                  sess) < 0) return -1;
 
     return 0;
 }
