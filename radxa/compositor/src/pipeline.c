@@ -236,13 +236,13 @@ int pipeline_composite(pipeline_t *p, layout_mode_t layout,
 
         rga_buffer_t src = wrapbuffer_fd(mpp_buffer_get_fd(dec_buf),
                                           src_w, src_h, RK_FORMAT_YCbCr_420_SP);
-        src.hstride = src_stride;
-        src.vstride = mpp_frame_get_ver_stride(p->dec_frame);
+        src.wstride = src_stride;
+        src.hstride = mpp_frame_get_ver_stride(p->dec_frame);
 
         rga_buffer_t dst = wrapbuffer_fd(comp_fd,
                                           p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-        dst.hstride = p->out_w;
-        dst.vstride = p->out_h;
+        dst.wstride = p->out_w;
+        dst.hstride = p->out_h;
 
         imresize(src, dst);
 
@@ -252,8 +252,8 @@ int pipeline_composite(pipeline_t *p, layout_mode_t layout,
                                                     cam_w, cam_h, RK_FORMAT_YCbCr_420_SP);
         rga_buffer_t dst = wrapbuffer_fd(comp_fd,
                                           p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-        dst.hstride = p->out_w;
-        dst.vstride = p->out_h;
+        dst.wstride = p->out_w;
+        dst.hstride = p->out_h;
 
         imresize(src, dst);
 
@@ -269,18 +269,18 @@ int pipeline_composite(pipeline_t *p, layout_mode_t layout,
 
             rga_buffer_t src = wrapbuffer_fd(mpp_buffer_get_fd(dec_buf),
                                               src_w, src_h, RK_FORMAT_YCbCr_420_SP);
-            src.hstride = mpp_frame_get_hor_stride(p->dec_frame);
-            src.vstride = mpp_frame_get_ver_stride(p->dec_frame);
+            src.wstride = mpp_frame_get_hor_stride(p->dec_frame);
+            src.hstride = mpp_frame_get_ver_stride(p->dec_frame);
 
             rga_buffer_t dst = wrapbuffer_fd(comp_fd,
                                               p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-            dst.hstride = p->out_w;
-            dst.vstride = p->out_h;
+            dst.wstride = p->out_w;
+            dst.hstride = p->out_h;
 
             im_rect dst_rect = {0, 0, half_w, p->out_h};
             improcess(src, dst, (rga_buffer_t){0},
                       (im_rect){0, 0, src_w, src_h}, dst_rect, (im_rect){0},
-                      IM_HAL_TRANSFORM_ROT_0);
+                      0);
         }
 
         /* Right half: camera */
@@ -290,13 +290,13 @@ int pipeline_composite(pipeline_t *p, layout_mode_t layout,
 
             rga_buffer_t dst = wrapbuffer_fd(comp_fd,
                                               p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-            dst.hstride = p->out_w;
-            dst.vstride = p->out_h;
+            dst.wstride = p->out_w;
+            dst.hstride = p->out_h;
 
             im_rect dst_rect = {half_w, 0, half_w, p->out_h};
             improcess(src, dst, (rga_buffer_t){0},
                       (im_rect){0, 0, cam_w, cam_h}, dst_rect, (im_rect){0},
-                      IM_HAL_TRANSFORM_ROT_0);
+                      0);
         }
     }
 
@@ -354,8 +354,8 @@ const uint8_t *pipeline_encode_camera_only(pipeline_t *p,
     int comp_fd = mpp_buffer_get_fd(p->comp_buf);
     rga_buffer_t dst = wrapbuffer_fd(comp_fd,
                                       p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-    dst.hstride = p->out_w;
-    dst.vstride = p->out_h;
+    dst.wstride = p->out_w;
+    dst.hstride = p->out_h;
     imresize(src, dst);
 
     return pipeline_encode(p, out_len);

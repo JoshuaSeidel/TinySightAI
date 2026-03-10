@@ -61,17 +61,14 @@ static int hci_configure_adapter(const char *adapter_addr, uint8_t out_addr[6])
 
     /* Set scan mode: inquiry + page (discoverable + connectable) */
     struct hci_request rq;
-    write_scan_enable_cp scan_cp;
+    uint8_t scan_enable = SCAN_INQUIRY | SCAN_PAGE;
     uint8_t scan_status;
-
-    memset(&scan_cp, 0, sizeof(scan_cp));
-    scan_cp.scan_enable = SCAN_INQUIRY | SCAN_PAGE;
 
     memset(&rq, 0, sizeof(rq));
     rq.ogf    = OGF_HOST_CTL;
     rq.ocf    = OCF_WRITE_SCAN_ENABLE;
-    rq.cparam = &scan_cp;
-    rq.clen   = WRITE_SCAN_ENABLE_CP_SIZE;
+    rq.cparam = &scan_enable;
+    rq.clen   = sizeof(scan_enable);
     rq.rparam = &scan_status;
     rq.rlen   = 1;
 
