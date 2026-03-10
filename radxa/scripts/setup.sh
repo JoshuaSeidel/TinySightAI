@@ -114,6 +114,13 @@ apt-get install -y \
 ok "All system packages installed"
 record_ok "System packages"
 
+# Immediately stop hostapd/dnsmasq if apt postinst auto-started them.
+# They depend on the ap0 virtual interface which doesn't exist yet.
+# They will start properly on reboot via ap0-setup.service dependency.
+systemctl stop hostapd 2>/dev/null || true
+systemctl stop dnsmasq 2>/dev/null || true
+ok "Stopped hostapd/dnsmasq (will start after reboot when ap0 exists)"
+
 # =============================================================================
 # STEP 2 — Rust / Cargo
 # =============================================================================
@@ -192,7 +199,7 @@ UNIT_EOF
 systemctl enable ap0-setup.service
 ok "ap0 virtual AP service created (192.168.4.1/24, wlan0 free for SSH)"
 
-# hostapd
+# hostapd — configure but do NOT start (ap0 doesn't exist until reboot)
 if [ -f "$CONFIG_DIR/hostapd.conf" ]; then
     install -m 640 "$CONFIG_DIR/hostapd.conf" /etc/hostapd/hostapd.conf
     # Ensure /etc/default/hostapd points at our config file
@@ -200,20 +207,36 @@ if [ -f "$CONFIG_DIR/hostapd.conf" ]; then
         sed -i 's|^#*DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' \
             /etc/default/hostapd
     fi
+    # Drop-in: hostapd must wait for ap0 interface to exist
+    mkdir -p /etc/systemd/system/hostapd.service.d
+    cat > /etc/systemd/system/hostapd.service.d/wait-for-ap0.conf <<'DROP_EOF'
+[Unit]
+Requires=ap0-setup.service
+After=ap0-setup.service
+DROP_EOF
     systemctl unmask hostapd 2>/dev/null || true
     systemctl enable hostapd
-    ok "hostapd configured and enabled"
+    systemctl stop hostapd 2>/dev/null || true
+    ok "hostapd configured and enabled (will start after reboot with ap0)"
     record_ok "hostapd (hidden 5GHz AP)"
 else
     warn "hostapd.conf not found at $CONFIG_DIR/hostapd.conf — skipping"
     record_warn "hostapd config missing"
 fi
 
-# dnsmasq
+# dnsmasq — configure but do NOT start (binds to ap0 which doesn't exist yet)
 if [ -f "$CONFIG_DIR/dnsmasq.conf" ]; then
     install -m 644 "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.d/aadongle.conf
+    # Drop-in: dnsmasq must wait for ap0 interface to exist
+    mkdir -p /etc/systemd/system/dnsmasq.service.d
+    cat > /etc/systemd/system/dnsmasq.service.d/wait-for-ap0.conf <<'DROP_EOF'
+[Unit]
+Requires=ap0-setup.service
+After=ap0-setup.service
+DROP_EOF
     systemctl enable dnsmasq
-    ok "dnsmasq configured and enabled"
+    systemctl stop dnsmasq 2>/dev/null || true
+    ok "dnsmasq configured and enabled (will start after reboot with ap0)"
     record_ok "dnsmasq (DHCP server)"
 else
     warn "dnsmasq.conf not found at $CONFIG_DIR/dnsmasq.conf — skipping"
@@ -226,6 +249,11 @@ if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.d/99-aadongle.conf 2>/dev/null
 fi
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 ok "IP forwarding enabled"
+
+# Safety: ensure NetworkManager + wpa_supplicant are still running (dev SSH access)
+systemctl is-active NetworkManager >/dev/null 2>&1 || systemctl start NetworkManager
+systemctl is-active wpa_supplicant >/dev/null 2>&1 || systemctl start wpa_supplicant
+ok "NetworkManager + wpa_supplicant verified running (dev SSH preserved)"
 
 # =============================================================================
 # STEP 5 — Bluetooth
