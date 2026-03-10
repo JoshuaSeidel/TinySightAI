@@ -34,6 +34,7 @@
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
 #include <libavutil/samplefmt.h>
+#include <libavutil/channel_layout.h>
 
 /* ALSA */
 #include <alsa/asoundlib.h>
@@ -222,8 +223,7 @@ static int decoder_init(airplay_audio_ctx_t *ctx)
 
     /* Common CarPlay audio parameters */
     avctx->sample_rate = AUDIO_SAMPLE_RATE;
-    avctx->channels    = AUDIO_CHANNELS;
-    avctx->channel_layout = AV_CH_LAYOUT_STEREO;
+    av_channel_layout_default(&avctx->ch_layout, AUDIO_CHANNELS);
 
     if (avcodec_open2(avctx, codec, NULL) < 0) {
         fprintf(stderr, "audio: avcodec_open2 failed\n");
@@ -274,7 +274,7 @@ static int decode_and_buffer(airplay_audio_ctx_t *ctx,
     while (avcodec_receive_frame(avctx, frame) == 0) {
         /* Convert to interleaved S16LE */
         int samples = frame->nb_samples;
-        int ch      = frame->channels;
+        int ch      = frame->ch_layout.nb_channels;
         size_t pcm_bytes = samples * ch * sizeof(int16_t);
 
         uint8_t *pcm_buf = malloc(pcm_bytes);

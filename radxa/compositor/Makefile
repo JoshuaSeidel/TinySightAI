@@ -7,8 +7,9 @@ CFLAGS += -I/usr/include/rockchip
 CFLAGS += -I/usr/include/rga
 CFLAGS += -I/usr/include/libdrm
 
-# RKNN SDK: enable if rknn_api.h is installed, otherwise stub out baby_ai
-ifneq ($(wildcard /usr/include/rknn_api.h),)
+# RKNN SDK: enable if librknnrt is installed, otherwise stub out baby_ai
+# Note: rknn_api.h may exist without librknnrt.so (header-only dev package)
+ifneq ($(wildcard /usr/lib/librknnrt.so /usr/lib/aarch64-linux-gnu/librknnrt.so),)
 LDFLAGS = -lrockchip_mpp -lrga -ldrm -lpthread -lm -lrknnrt
 else
 CFLAGS += -DBABY_AI_STUB
