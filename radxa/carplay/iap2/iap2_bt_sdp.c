@@ -234,7 +234,7 @@ static sdp_record_t *build_hfp_ag_record(void)
 
     /* HFP network feature bit: no ability to reject calls */
     uint8_t network = 0x00;
-    sdp_attr_add_new(record, SDP_ATTR_NET, SDP_UINT8, &network);
+    sdp_attr_add_new(record, SDP_ATTR_NETWORK, SDP_UINT8, &network);
 
     /* HFP supported features bitmap (AG): basic set */
     uint16_t features = 0x0003; /* 3-way calling + echo cancel */
