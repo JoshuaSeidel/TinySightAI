@@ -34,8 +34,8 @@ step "[1/5] Disabling unused services..."
 
 DISABLE_SERVICES=(
     ModemManager
-    NetworkManager
-    wpa_supplicant
+    # NetworkManager — KEEP for dev SSH over WiFi (wlan0 STA mode)
+    # wpa_supplicant — KEEP (required by NetworkManager for WiFi)
     cups
     cups-browsed
     triggerhappy
@@ -74,10 +74,11 @@ ok "Desktop packages removed (or were already absent)"
 step "[3/5] Removing unneeded packages..."
 apt-get remove --purge -y \
     modemmanager \
-    network-manager \
     cups \
     man-db manpages \
     2>/dev/null || true
+# NOTE: network-manager is NOT removed — needed for dev WiFi SSH access.
+# It will be removed later by build-minimal-rootfs.sh for production.
 ok "Unneeded packages removed"
 
 # =============================================================================
