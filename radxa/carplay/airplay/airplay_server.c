@@ -82,7 +82,7 @@ static void read_system_mac(char *out_mac, size_t out_len)
 
     struct ifreq ifr;
     /* Try common interface names */
-    const char *ifaces[] = { "wlan0", "eth0", "end0", NULL };
+    const char *ifaces[] = { "ap0", "wlan0", "eth0", "end0", NULL };
     bool found = false;
 
     for (int i = 0; ifaces[i] && !found; i++) {

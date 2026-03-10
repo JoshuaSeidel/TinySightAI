@@ -260,14 +260,10 @@ cat > "$NEWROOT/etc/hosts" << 'EOF'
 ::1       localhost aadongle
 EOF
 
-# Network — static wlan0
-mkdir -p "$NEWROOT/etc/network/interfaces.d"
-cat > "$NEWROOT/etc/network/interfaces.d/wlan0" << 'EOF'
-auto wlan0
-iface wlan0 inet static
-    address 192.168.4.1
-    netmask 255.255.255.0
-EOF
+# Network — virtual AP interface (ap0) gets static IP via systemd service
+# wlan0 stays free for NetworkManager (dev SSH access)
+# The ap0-setup.service creates the virtual interface and assigns the IP
+# See: radxa/scripts/setup.sh for the service definition
 
 # Loopback
 cat > "$NEWROOT/etc/network/interfaces" << 'EOF'

@@ -177,15 +177,15 @@ def get_network_info() -> dict:
     """Get WiFi AP and connected clients info."""
     info = {}
 
-    # WiFi interface
+    # AP interface
     try:
         result = subprocess.run(
-            ["ip", "addr", "show", "wlan0"],
+            ["ip", "addr", "show", "ap0"],
             capture_output=True, text=True, timeout=3
         )
-        info["wlan0"] = result.stdout.strip()
+        info["ap0"] = result.stdout.strip()
     except (subprocess.TimeoutExpired, OSError):
-        info["wlan0"] = "unavailable"
+        info["ap0"] = "unavailable"
 
     # Connected clients (hostapd)
     try:

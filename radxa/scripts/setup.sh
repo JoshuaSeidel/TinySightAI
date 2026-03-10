@@ -161,14 +161,36 @@ ok "Directory tree created under $INSTALL_DIR"
 # =============================================================================
 step "[5/10] Configuring networking (WiFi AP + DHCP)..."
 
-# Static IP for wlan0 via /etc/network/interfaces.d
-cat > /etc/network/interfaces.d/wlan0 <<'WLAN0_EOF'
-auto wlan0
-iface wlan0 inet static
-    address 192.168.4.1
-    netmask 255.255.255.0
-WLAN0_EOF
-ok "wlan0 static IP set to 192.168.4.1"
+# Tell NetworkManager to leave the virtual AP interface alone (hostapd manages it)
+# wlan0 stays managed by NetworkManager for dev SSH access
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/aadongle-unmanaged.conf <<'NM_EOF'
+[keyfile]
+unmanaged-devices=interface-name:ap0
+NM_EOF
+ok "ap0 marked unmanaged by NetworkManager (wlan0 stays managed for dev SSH)"
+
+# Create a service to set up the virtual AP interface and assign static IP
+cat > /etc/systemd/system/ap0-setup.service <<'UNIT_EOF'
+[Unit]
+Description=Create virtual AP interface (ap0) and set static IP
+Before=hostapd.service
+After=sys-subsystem-net-devices-wlan0.device
+Wants=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/iw dev wlan0 interface add ap0 type __ap
+ExecStart=/sbin/ip addr add 192.168.4.1/24 dev ap0
+ExecStart=/sbin/ip link set ap0 up
+ExecStop=/sbin/iw dev ap0 del
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+systemctl enable ap0-setup.service
+ok "ap0 virtual AP service created (192.168.4.1/24, wlan0 free for SSH)"
 
 # hostapd
 if [ -f "$CONFIG_DIR/hostapd.conf" ]; then
@@ -386,13 +408,13 @@ SERVICES=(
     config-server
 )
 
+SYSTEMD_SRC="$CONFIG_DIR/systemd"
+
 # Also install the aadongle.target
 if [ -f "${SYSTEMD_SRC}/aadongle.target" ]; then
     cp "${SYSTEMD_SRC}/aadongle.target" /etc/systemd/system/
     ok "Installed aadongle.target"
 fi
-
-SYSTEMD_SRC="$CONFIG_DIR/systemd"
 for svc in "${SERVICES[@]}"; do
     svc_file="${SYSTEMD_SRC}/${svc}.service"
     if [ -f "$svc_file" ]; then
@@ -483,7 +505,7 @@ echo "  1. Reboot so camera overlay, IP forwarding, and module changes take effe
 echo "  2. If IMX219 overlay was not auto-applied: sudo rsetup → Overlays → radxa-zero3-imx219"
 echo "  3. Connect T-Dongle-S3 to car USB-A, phone to hidden SSID 'AADongle'."
 echo "  4. Monitor services: journalctl -fu aa-bridge  |  journalctl -fu carplay"
-echo "  5. Check WiFi AP: iwconfig wlan0  |  hostapd_cli status"
+echo "  5. Check WiFi AP: iw dev ap0 info  |  hostapd_cli status"
 echo "  6. Optional: sudo bash $SCRIPT_DIR/install-mpp.sh   (builds ffmpeg-rockchip)"
 echo "  7. For production: sudo bash $SCRIPT_DIR/make-readonly.sh (read-only root, hard power safe)"
 echo ""
