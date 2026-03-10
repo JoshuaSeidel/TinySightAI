@@ -1,6 +1,6 @@
 #include "usb_bridge.h"
 #include "tinyusb.h"
-#include "tusb_cdc_acm.h"
+#include "class/vendor/vendor_device.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -73,13 +73,11 @@ void tud_resume_cb(void)
 }
 
 /* Vendor class RX callback — car sent us data */
-void tud_vendor_rx_cb(uint8_t itf)
+void tud_vendor_rx_cb(uint8_t itf, uint8_t const *buffer, uint16_t bufsize)
 {
     (void)itf;
-    uint8_t buf[USB_BUF_SIZE];
-    uint32_t count = tud_vendor_read(buf, sizeof(buf));
-    if (count > 0 && s_rx_cb) {
-        s_rx_cb(buf, count);
+    if (bufsize > 0 && s_rx_cb) {
+        s_rx_cb(buffer, bufsize);
     }
 }
 

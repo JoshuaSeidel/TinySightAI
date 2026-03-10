@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 
 /* Android Open Accessory (AOA) USB descriptors */

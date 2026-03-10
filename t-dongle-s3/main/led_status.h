@@ -2,8 +2,9 @@
 
 #include "esp_err.h"
 
-/* T-Dongle-S3 onboard LED (directly on the PCB) */
-#define LED_GPIO   39  /* LilyGO T-Dongle-S3 onboard addressable LED */
+/* T-Dongle-S3 onboard APA102 LED (SPI: data + clock) */
+#define LED_DATA_GPIO   40
+#define LED_CLK_GPIO    39
 
 typedef enum {
     LED_OFF,

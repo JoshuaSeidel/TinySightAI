@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include "esp_err.h"
 
 /* Default Radxa AP credentials — can be overridden via BLE */

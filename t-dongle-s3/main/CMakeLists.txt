@@ -13,7 +13,7 @@ idf_component_register(
         esp_wifi
         esp_event
         nvs_flash
-        tinyusb
+        esp_tinyusb
         bt
         esp_timer
         lwip

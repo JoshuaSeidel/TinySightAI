@@ -3,28 +3,55 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "led_strip.h"
 
 static const char *TAG = "led";
 
 static led_state_t s_state = LED_OFF;
-static led_strip_handle_t s_strip = NULL;
 
-/* T-Dongle-S3 uses an addressable RGB LED (WS2812) on GPIO 39 */
+/*
+ * T-Dongle-S3 uses an APA102 RGB LED (SPI-based, 2-wire):
+ *   Data  = GPIO 39
+ *   Clock = GPIO 40
+ *
+ * APA102 protocol:
+ *   Start frame:  4 bytes 0x00
+ *   LED frame:    0xE0 | brightness(0-31), Blue, Green, Red
+ *   End frame:    4 bytes 0xFF
+ */
+
+static void apa102_write_byte(uint8_t byte)
+{
+    for (int i = 7; i >= 0; i--) {
+        gpio_set_level(LED_DATA_GPIO, (byte >> i) & 1);
+        gpio_set_level(LED_CLK_GPIO, 1);
+        gpio_set_level(LED_CLK_GPIO, 0);
+    }
+}
 
 static void set_color(uint8_t r, uint8_t g, uint8_t b)
 {
-    if (s_strip) {
-        led_strip_set_pixel(s_strip, 0, r, g, b);
-        led_strip_refresh(s_strip);
-    }
+    /* Start frame */
+    for (int i = 0; i < 4; i++) apa102_write_byte(0x00);
+    /* LED frame: max brightness (31) */
+    apa102_write_byte(0xE0 | 15);
+    apa102_write_byte(b);
+    apa102_write_byte(g);
+    apa102_write_byte(r);
+    /* End frame */
+    for (int i = 0; i < 4; i++) apa102_write_byte(0xFF);
 }
 
 static void led_off(void)
 {
-    if (s_strip) {
-        led_strip_clear(s_strip);
-    }
+    /* Start frame */
+    for (int i = 0; i < 4; i++) apa102_write_byte(0x00);
+    /* LED frame: brightness 0 */
+    apa102_write_byte(0xE0);
+    apa102_write_byte(0);
+    apa102_write_byte(0);
+    apa102_write_byte(0);
+    /* End frame */
+    for (int i = 0; i < 4; i++) apa102_write_byte(0xFF);
 }
 
 static void led_task(void *arg)
@@ -76,21 +103,19 @@ static void led_task(void *arg)
 
 esp_err_t led_status_init(void)
 {
-    ESP_LOGI(TAG, "Initializing LED on GPIO %d", LED_GPIO);
+    ESP_LOGI(TAG, "Initializing APA102 LED (data=%d, clk=%d)", LED_DATA_GPIO, LED_CLK_GPIO);
 
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = LED_GPIO,
-        .max_leds = 1,
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << LED_DATA_GPIO) | (1ULL << LED_CLK_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
     };
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000, /* 10 MHz */
-    };
+    gpio_config(&io_conf);
 
-    esp_err_t ret = led_strip_new_rmt_device(&strip_config, &rmt_config, &s_strip);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "LED strip init failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    gpio_set_level(LED_DATA_GPIO, 0);
+    gpio_set_level(LED_CLK_GPIO, 0);
 
     led_off();
 
