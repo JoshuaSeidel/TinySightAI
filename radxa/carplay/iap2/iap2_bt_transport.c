@@ -80,17 +80,17 @@ static int hci_configure_adapter(const char *adapter_addr, uint8_t out_addr[6])
     }
 
     /* Set device class to 0x000408 (car audio) */
-    write_class_of_dev_cp cod_cp;
+    uint8_t dev_class[3];
     uint8_t cod_status;
-    cod_cp.dev_class[0] = (IAP2_BT_COD >> 0)  & 0xFF;
-    cod_cp.dev_class[1] = (IAP2_BT_COD >> 8)  & 0xFF;
-    cod_cp.dev_class[2] = (IAP2_BT_COD >> 16) & 0xFF;
+    dev_class[0] = (IAP2_BT_COD >> 0)  & 0xFF;
+    dev_class[1] = (IAP2_BT_COD >> 8)  & 0xFF;
+    dev_class[2] = (IAP2_BT_COD >> 16) & 0xFF;
 
     memset(&rq, 0, sizeof(rq));
     rq.ogf    = OGF_HOST_CTL;
     rq.ocf    = OCF_WRITE_CLASS_OF_DEV;
-    rq.cparam = &cod_cp;
-    rq.clen   = WRITE_CLASS_OF_DEV_CP_SIZE;
+    rq.cparam = dev_class;
+    rq.clen   = sizeof(dev_class);
     rq.rparam = &cod_status;
     rq.rlen   = 1;
 

@@ -304,7 +304,6 @@ static void *camera_only_thread(void *arg)
 
         pthread_mutex_lock(&g_lock);
 
-        uint64_t ts = monotonic_ns();
         size_t out_len = 0;
         const uint8_t *h264_out = pipeline_encode_camera_only(
             g_pipeline, cam_data, g_camera.width, g_camera.height, &out_len);

@@ -10,22 +10,6 @@
 
 /* ---- Start code scanning ---- */
 
-/*
- * Returns the length of the start code (3 or 4) at data[pos], or 0 if
- * data[pos..pos+2] is not 0x00 0x00 0x01.
- */
-static int sc_len_at(const uint8_t *data, size_t len, size_t pos)
-{
-    if (pos + 2 >= len)
-        return 0;
-    if (data[pos] != 0x00 || data[pos + 1] != 0x00 || data[pos + 2] != 0x01)
-        return 0;
-    /* Prefer 4-byte form when preceded by 0x00 */
-    if (pos > 0 && data[pos - 1] == 0x00)
-        return 4; /* caller sees the lead zero as part of the start code */
-    return 3;
-}
-
 int nal_find_start_code(const uint8_t *data, size_t len, size_t *offset)
 {
     if (!data || !offset || len < 3)
@@ -48,29 +32,6 @@ int nal_find_start_code(const uint8_t *data, size_t len, size_t *offset)
         }
     }
     return 0;
-}
-
-/* ---- NAL header extraction ---- */
-
-/*
- * Returns a pointer to the first NAL header byte after a start code, or NULL.
- * Also fills *sc_sz with the start-code length (3 or 4).
- */
-static const uint8_t *first_nal_header(const uint8_t *data, size_t len,
-                                        int *sc_sz)
-{
-    size_t offset = 0;
-    int sclen = nal_find_start_code(data, len, &offset);
-    if (sclen == 0)
-        return NULL;
-
-    size_t nal_pos = offset + sclen;
-    if (nal_pos >= len)
-        return NULL;
-
-    if (sc_sz)
-        *sc_sz = sclen;
-    return data + nal_pos;
 }
 
 /* ---- Codec detection ---- */

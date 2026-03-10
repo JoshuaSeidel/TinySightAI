@@ -12,7 +12,8 @@ LDFLAGS = -lpthread -lcrypto -lssl -lbluetooth -ldbus-1 \
           -lm \
           $(shell pkg-config --libs libavcodec libavutil 2>/dev/null)
 
-SRC = mfi/mfi_auth.c \
+SRC = main.c \
+      mfi/mfi_auth.c \
       iap2/iap2_link.c \
       iap2/iap2_session.c \
       iap2/iap2_bt_sdp.c \
