@@ -10,15 +10,21 @@
 #   2. setup.sh has already been run (all binaries compiled)
 #   3. At least 512MB free RAM (for tmpfs build area)
 #
-# Usage: sudo bash build-minimal-rootfs.sh [--dry-run]
+# Usage: sudo bash build-minimal-rootfs.sh [--dry-run | --no-deploy]
+#
+# Options:
+#   --dry-run     Show what would happen, don't actually build
+#   --no-deploy   Build the rootfs but don't deploy (stays at /mnt/newroot)
+#   (default)     Build AND deploy — rsync over / then force reboot via sysrq
 #
 # What this does:
 #   1. Creates minimal Debian rootfs via debootstrap
-#   2. Installs only required runtime packages (~90 packages)
+#   2. Installs required runtime packages + SSH + sudo + NetworkManager
 #   3. Copies vendor kernel modules + firmware from running system
 #   4. Installs our pre-built binaries and configs
-#   5. Applies read-only root + overlayfs hardening
-#   6. Replaces current rootfs (with backup)
+#   5. Creates radxa user, copies SSH keys + WiFi profiles
+#   6. Applies read-only root + overlayfs hardening
+#   7. Deploys over live system via rsync + force reboot
 # =============================================================================
 
 set -euo pipefail
@@ -162,8 +168,20 @@ ok "Radxa apt repo configured"
 # ---------------------------------------------------------------------------
 step "[3/9] Installing runtime packages (only what we need)..."
 
+# Prevent services from auto-starting during package installation in chroot
+mkdir -p "$NEWROOT/usr/sbin"
+cat > "$NEWROOT/usr/sbin/policy-rc.d" << 'RCEOF'
+#!/bin/sh
+exit 101
+RCEOF
+chmod +x "$NEWROOT/usr/sbin/policy-rc.d"
+
 # Standard Debian packages (always available)
 chroot "$NEWROOT" apt-get install -y --no-install-recommends \
+    `# SSH + sudo + dev access (CRITICAL — without these, can't log in after deploy)` \
+    sudo openssh-server \
+    `# WiFi STA management (dev SSH over wlan0) + AP virtual interface` \
+    network-manager wpasupplicant iw \
     `# Network` \
     hostapd dnsmasq-base iproute2 netcat-openbsd ifupdown \
     `# Bluetooth + mDNS` \
@@ -184,8 +202,8 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     python3-minimal python3-dbus python3-gi gir1.2-glib-2.0 \
     `# f2fs for /data partition` \
     f2fs-tools \
-    `# wget for OTA downloads` \
-    wget \
+    `# Deploy + OTA` \
+    rsync wget \
     2>&1 | tail -5
 
 # Rockchip vendor packages — try apt first, fall back to copying from host
@@ -216,6 +234,7 @@ ok "Runtime packages installed ($(chroot "$NEWROOT" dpkg --list | grep '^ii' | w
 chroot "$NEWROOT" apt-get clean
 rm -rf "$NEWROOT/var/lib/apt/lists/"*
 rm -rf "$NEWROOT/var/cache/apt/archives/"*
+rm -f "$NEWROOT/usr/sbin/policy-rc.d"
 ok "Package cache cleaned"
 
 # ---------------------------------------------------------------------------
@@ -337,11 +356,11 @@ EOF
 mkdir -p "$NEWROOT/etc/systemd/journald.conf.d"
 cp "$CONFIG_DIR/journald-volatile.conf" "$NEWROOT/etc/systemd/journald.conf.d/volatile.conf"
 
-# fstab — root read-only + tmpfs mounts + /data partition
-cat > "$NEWROOT/etc/fstab" << 'EOF'
+# fstab — auto-detect root device, tmpfs mounts
+ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || echo "/dev/mmcblk1p3")
+cat > "$NEWROOT/etc/fstab" << EOF
 # <device>    <mount>     <type>  <options>                     <dump> <pass>
-/dev/mmcblk0p2  /         ext4    ro,noatime,errors=remount-ro  0      1
-/dev/mmcblk0p3  /data     f2fs    noatime,discard               0      2
+${ROOT_DEV}     /         ext4    noatime,errors=remount-ro     0      1
 tmpfs           /tmp      tmpfs   nosuid,nodev,size=64M         0      0
 tmpfs           /var/log  tmpfs   nosuid,nodev,size=32M         0      0
 tmpfs           /var/tmp  tmpfs   nosuid,nodev,size=16M         0      0
@@ -365,6 +384,91 @@ cat > "$NEWROOT/opt/aadongle/config/defaults.json" << 'DEFAULTS'
 }
 DEFAULTS
 
+# --- User setup (radxa user with sudo) ---
+chroot "$NEWROOT" useradd -m -s /bin/bash -G sudo radxa 2>/dev/null || true
+# Copy password hash from running system so same password works
+RADXA_SHADOW=$(grep '^radxa:' /etc/shadow 2>/dev/null || true)
+if [ -n "$RADXA_SHADOW" ]; then
+    sed -i "s|^radxa:.*|$RADXA_SHADOW|" "$NEWROOT/etc/shadow"
+    ok "radxa user created (password copied from running system)"
+else
+    echo "radxa:radxa" | chroot "$NEWROOT" chpasswd
+    ok "radxa user created (default password: radxa)"
+fi
+
+# Allow sudo without password (same as stock image)
+echo "radxa ALL=(ALL) NOPASSWD: ALL" > "$NEWROOT/etc/sudoers.d/radxa"
+chmod 440 "$NEWROOT/etc/sudoers.d/radxa"
+
+# --- SSH setup ---
+# Copy host keys so SSH fingerprint doesn't change after deploy
+if [ -d /etc/ssh ]; then
+    cp /etc/ssh/ssh_host_* "$NEWROOT/etc/ssh/" 2>/dev/null || true
+    ok "SSH host keys copied from running system"
+fi
+
+# Copy authorized_keys for radxa user
+if [ -f /home/radxa/.ssh/authorized_keys ]; then
+    mkdir -p "$NEWROOT/home/radxa/.ssh"
+    cp /home/radxa/.ssh/authorized_keys "$NEWROOT/home/radxa/.ssh/"
+    chroot "$NEWROOT" chown -R radxa:radxa /home/radxa/.ssh
+    chmod 700 "$NEWROOT/home/radxa/.ssh"
+    chmod 600 "$NEWROOT/home/radxa/.ssh/authorized_keys"
+    ok "SSH authorized_keys copied"
+fi
+
+# --- NetworkManager config ---
+# Tell NM to leave ap0 alone (hostapd manages it), keep wlan0 managed for dev SSH
+mkdir -p "$NEWROOT/etc/NetworkManager/conf.d"
+cat > "$NEWROOT/etc/NetworkManager/conf.d/aadongle-unmanaged.conf" <<'NM_EOF'
+[keyfile]
+unmanaged-devices=interface-name:ap0
+NM_EOF
+
+# Copy WiFi connection profiles so NM can auto-connect on boot
+if [ -d /etc/NetworkManager/system-connections ]; then
+    mkdir -p "$NEWROOT/etc/NetworkManager/system-connections"
+    cp /etc/NetworkManager/system-connections/* \
+       "$NEWROOT/etc/NetworkManager/system-connections/" 2>/dev/null || true
+    ok "NetworkManager WiFi profiles copied (dev SSH will work after deploy)"
+fi
+
+# --- ap0-setup.service (creates virtual AP interface) ---
+cat > "$NEWROOT/etc/systemd/system/ap0-setup.service" <<'UNIT_EOF'
+[Unit]
+Description=Create virtual AP interface (ap0) and set static IP
+Before=hostapd.service
+After=sys-subsystem-net-devices-wlan0.device
+Wants=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/iw dev wlan0 interface add ap0 type __ap
+ExecStart=/sbin/ip addr add 192.168.4.1/24 dev ap0
+ExecStart=/sbin/ip link set ap0 up
+ExecStop=/sbin/iw dev ap0 del
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+# --- hostapd drop-in: wait for ap0 ---
+mkdir -p "$NEWROOT/etc/systemd/system/hostapd.service.d"
+cat > "$NEWROOT/etc/systemd/system/hostapd.service.d/wait-for-ap0.conf" <<'DROP_EOF'
+[Unit]
+Requires=ap0-setup.service
+After=ap0-setup.service
+DROP_EOF
+
+# --- dnsmasq drop-in: wait for ap0 ---
+mkdir -p "$NEWROOT/etc/systemd/system/dnsmasq.service.d"
+cat > "$NEWROOT/etc/systemd/system/dnsmasq.service.d/wait-for-ap0.conf" <<'DROP_EOF'
+[Unit]
+Requires=ap0-setup.service
+After=ap0-setup.service
+DROP_EOF
+
 ok "System configured"
 
 # ---------------------------------------------------------------------------
@@ -382,10 +486,15 @@ done
 
 # Enable services in chroot
 chroot "$NEWROOT" bash -c "
+    # Critical system services
+    systemctl enable ssh 2>/dev/null || true
+    systemctl enable NetworkManager 2>/dev/null || true
+    systemctl enable ap0-setup 2>/dev/null || true
     systemctl enable hostapd 2>/dev/null || true
     systemctl enable dnsmasq 2>/dev/null || true
     systemctl enable bluetooth 2>/dev/null || true
     systemctl enable avahi-daemon 2>/dev/null || true
+    # AADongle services
     systemctl enable aadongle.target 2>/dev/null || true
     systemctl enable aa-bridge 2>/dev/null || true
     systemctl enable aa-proxy 2>/dev/null || true
@@ -459,27 +568,9 @@ fi
 ok "Read-only root configured"
 
 # ---------------------------------------------------------------------------
-# Step 9: Create /data partition and swap rootfs
+# Step 9: Deploy minimal rootfs
 # ---------------------------------------------------------------------------
-step "[9/9] Finalizing..."
-
-# Determine root partition device
-ROOT_DEV=$(findmnt -n -o SOURCE /)
-ROOT_DISK=$(echo "$ROOT_DEV" | sed 's/p[0-9]*$//')
-
-echo "  Root device: $ROOT_DEV"
-echo "  Disk: $ROOT_DISK"
-
-# Check if partition 3 exists for /data
-DATA_DEV="${ROOT_DISK}p3"
-if [ ! -b "$DATA_DEV" ]; then
-    warn "No partition 3 found for /data — you'll need to create it manually:"
-    warn "  fdisk $ROOT_DISK  (create partition 3, ~64MB)"
-    warn "  mkfs.f2fs $DATA_DEV"
-    warn "  mkdir -p /data && mount $DATA_DEV /data"
-else
-    ok "Data partition exists: $DATA_DEV"
-fi
+step "[9/9] Deploying minimal rootfs..."
 
 # Show size comparison
 echo ""
@@ -490,28 +581,58 @@ echo ""
 
 # Safety: back up current rootfs manifest
 dpkg --list > /tmp/old-rootfs-packages.txt 2>/dev/null || true
-ok "Package manifest saved to /tmp/old-rootfs-packages.txt"
+
+if [ "${1:-}" = "--no-deploy" ]; then
+    ok "Minimal rootfs built at $NEWROOT (--no-deploy: skipping deployment)"
+    echo ""
+    echo "To deploy manually later:"
+    echo "  sudo bash $0 --deploy-only"
+    echo ""
+    # Unmount will happen via trap
+    exit 0
+fi
 
 echo ""
-echo "=== Minimal rootfs built at $NEWROOT ==="
+echo -e "${YLW}WARNING: About to replace the current rootfs and force reboot.${RST}"
+echo -e "${YLW}The system will rsync the new rootfs over / and immediately reboot.${RST}"
 echo ""
-echo "To deploy (DESTRUCTIVE — replaces current rootfs):"
-echo ""
-echo "  # 1. Create /data partition if not exists:"
-echo "  #    fdisk $ROOT_DISK → create p3 (64MB)"
-echo "  #    mkfs.f2fs ${ROOT_DISK}p3"
-echo ""
-echo "  # 2. Swap rootfs:"
-echo "  rsync -aAX --delete $NEWROOT/ /  \\"
-echo "    --exclude=/proc --exclude=/sys --exclude=/dev \\"
-echo "    --exclude=/mnt --exclude=/boot --exclude=/data"
-echo ""
-echo "  # 3. Reboot:"
-echo "  reboot"
-echo ""
-echo "  Or, to create a tarball for later:"
-echo "  tar czf /tmp/aadongle-rootfs.tar.gz -C $NEWROOT ."
-echo ""
-echo "Boot params 'disable_overlayfs' bypasses read-only root for maintenance."
+echo "Press Ctrl-C within 10 seconds to abort..."
+sleep 10
 
-# Unmount will happen via trap
+echo ""
+step "Deploying via rsync..."
+
+# Unmount chroot bind mounts before rsync (avoid copying /proc etc from chroot)
+cleanup_mounts
+
+# rsync the new rootfs over the live system
+# Exclude: virtual filesystems, build area, boot partition, build tools, swap
+rsync -aAX --delete "$NEWROOT/" / \
+    --exclude=/proc \
+    --exclude=/sys \
+    --exclude=/dev \
+    --exclude=/mnt \
+    --exclude=/boot \
+    --exclude=/data \
+    --exclude=/tmp \
+    --exclude=/swapfile \
+    --exclude=/home/radxa/TinySightAI \
+    --exclude=/root/.cargo \
+    --exclude=/root/.rustup \
+    2>&1 || true
+
+ok "rsync complete"
+
+# Force immediate reboot via kernel sysrq
+# This bypasses userspace entirely — no reliance on replaced binaries
+echo ""
+echo "Syncing disks and force-rebooting via sysrq..."
+sync
+sleep 1
+echo s > /proc/sysrq-trigger  # sync all filesystems
+sleep 2
+echo b > /proc/sysrq-trigger  # immediate reboot
+
+# Should never reach here, but just in case
+sleep 5
+reboot -f 2>/dev/null || true
