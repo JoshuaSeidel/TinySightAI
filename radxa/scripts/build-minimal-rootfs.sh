@@ -162,6 +162,7 @@ ok "Radxa apt repo configured"
 # ---------------------------------------------------------------------------
 step "[3/9] Installing runtime packages (only what we need)..."
 
+# Standard Debian packages (always available)
 chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     `# Network` \
     hostapd dnsmasq-base iproute2 netcat-openbsd ifupdown \
@@ -169,8 +170,8 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     bluez avahi-daemon \
     `# Camera / GPIO / I2C` \
     v4l-utils gpiod i2c-tools \
-    `# Rockchip vendor` \
-    librockchip-mpp1 librga2 libdrm2 \
+    `# DRM` \
+    libdrm2 \
     `# CarPlay shared libs` \
     libssl3 \
     libavahi-client3 libavahi-common3 \
@@ -186,6 +187,28 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     `# wget for OTA downloads` \
     wget \
     2>&1 | tail -5
+
+# Rockchip vendor packages — try apt first, fall back to copying from host
+step "  Installing Rockchip vendor packages..."
+if chroot "$NEWROOT" apt-get install -y --no-install-recommends \
+    librockchip-mpp1 librga2 2>/dev/null; then
+    ok "Rockchip packages installed via apt"
+else
+    warn "Rockchip packages not in chroot apt — copying libraries from host"
+    # Copy MPP libs
+    for lib in /usr/lib/aarch64-linux-gnu/librockchip_mpp*; do
+        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/"
+    done
+    # Copy RGA libs
+    for lib in /usr/lib/aarch64-linux-gnu/librga*; do
+        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/"
+    done
+    # Also check /usr/lib/ directly
+    for lib in /usr/lib/librockchip_mpp* /usr/lib/librga*; do
+        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/"
+    done
+    ok "Rockchip libraries copied from host"
+fi
 
 ok "Runtime packages installed ($(chroot "$NEWROOT" dpkg --list | grep '^ii' | wc -l) packages)"
 
