@@ -342,7 +342,17 @@ fi
 # -----------------------------------------------------------------------
 step "[7/10] Building aa-proxy (Rust)..."
 cd "$RADXA_DIR/aa-proxy"
-if cargo build --release 2>&1; then
+
+# Radxa has 1GB RAM — tokio release build OOMs without swap
+if [ ! -f /swapfile ]; then
+    echo "  Creating 1GB swap (needed for Rust release build)..."
+    dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
+    chmod 600 /swapfile
+    mkswap /swapfile
+fi
+swapon /swapfile 2>/dev/null || true
+
+if cargo build --release -j2 2>&1; then
     install -m 755 target/release/aa-proxy "$INSTALL_DIR/bin/aa-proxy"
     ok "aa-proxy built and installed to $INSTALL_DIR/bin/aa-proxy"
     record_ok "aa-proxy binary (Rust)"
@@ -350,6 +360,8 @@ else
     fail "aa-proxy cargo build failed"
     record_warn "aa-proxy: BUILD FAILED"
 fi
+
+swapoff /swapfile 2>/dev/null || true
 
 # -----------------------------------------------------------------------
 # 8d. ustreamer (MJPEG camera server for baby-monitor web UI)
