@@ -36,8 +36,8 @@ INSTALL_DIR="/opt/aadongle"
 NEWROOT="/mnt/newroot"
 DEBIAN_SUITE="bookworm"
 DEBIAN_MIRROR="http://deb.debian.org/debian"
-RADXA_REPO="http://apt.radxa.com/bookworm-stable"
-RADXA_KEYRING_URL="https://apt.radxa.com/bookworm-stable/public.key"
+RADXA_REPO="https://radxa-repo.github.io/bookworm"
+RADXA_KEYRING="/usr/share/keyrings/radxa-archive-keyring-2022.gpg"
 
 DRY_RUN=false
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=true
@@ -122,27 +122,30 @@ cleanup_mounts() {
 }
 trap cleanup_mounts EXIT
 
-# Copy Radxa repo config + GPG keys from host (already working on this system)
-if ls /etc/apt/sources.list.d/radxa*.list /etc/apt/sources.list.d/radxa*.sources 2>/dev/null | head -1; then
-    cp /etc/apt/sources.list.d/radxa*.list "$NEWROOT/etc/apt/sources.list.d/" 2>/dev/null || true
-    cp /etc/apt/sources.list.d/radxa*.sources "$NEWROOT/etc/apt/sources.list.d/" 2>/dev/null || true
-    ok "Copied Radxa repo config from host"
-else
-    # Fallback: write manually
-    cat > "$NEWROOT/etc/apt/sources.list.d/radxa.list" << EOF
-deb $RADXA_REPO $DEBIAN_SUITE main
-EOF
-    warn "No Radxa repo found on host — using hardcoded URL"
-fi
-
-# Copy all Radxa GPG keys from host
-for keydir in /etc/apt/trusted.gpg.d /etc/apt/keyrings /usr/share/keyrings; do
-    if ls "$keydir"/radxa* 2>/dev/null | head -1; then
+# Copy all Radxa GPG keys from host first
+FOUND_KEY=false
+for keydir in /usr/share/keyrings /etc/apt/trusted.gpg.d /etc/apt/keyrings; do
+    if ls "$keydir"/radxa* 2>/dev/null | head -1 >/dev/null; then
         mkdir -p "$NEWROOT/$keydir"
         cp "$keydir"/radxa* "$NEWROOT/$keydir/"
         ok "Copied Radxa GPG keys from $keydir"
+        FOUND_KEY=true
     fi
 done
+$FOUND_KEY || warn "No Radxa GPG key found on host"
+
+# Copy Radxa repo config from host — search all sources files for "radxa"
+HOST_RADXA_SRC=$(grep -rl "radxa" /etc/apt/sources.list.d/ 2>/dev/null | head -1)
+if [ -n "$HOST_RADXA_SRC" ]; then
+    cp "$HOST_RADXA_SRC" "$NEWROOT/etc/apt/sources.list.d/"
+    ok "Copied Radxa repo config from host ($HOST_RADXA_SRC)"
+else
+    # Fallback: write with correct GitHub Pages URL + signed-by
+    cat > "$NEWROOT/etc/apt/sources.list.d/radxa.list" << EOF
+deb [signed-by=$RADXA_KEYRING] $RADXA_REPO $DEBIAN_SUITE main
+EOF
+    ok "Radxa repo configured (fallback: $RADXA_REPO)"
+fi
 
 # Also keep standard Debian repo
 cat > "$NEWROOT/etc/apt/sources.list" << EOF
