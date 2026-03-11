@@ -122,23 +122,27 @@ cleanup_mounts() {
 }
 trap cleanup_mounts EXIT
 
-# Add Radxa repo
-cat > "$NEWROOT/etc/apt/sources.list.d/radxa.list" << EOF
+# Copy Radxa repo config + GPG keys from host (already working on this system)
+if ls /etc/apt/sources.list.d/radxa*.list /etc/apt/sources.list.d/radxa*.sources 2>/dev/null | head -1; then
+    cp /etc/apt/sources.list.d/radxa*.list "$NEWROOT/etc/apt/sources.list.d/" 2>/dev/null || true
+    cp /etc/apt/sources.list.d/radxa*.sources "$NEWROOT/etc/apt/sources.list.d/" 2>/dev/null || true
+    ok "Copied Radxa repo config from host"
+else
+    # Fallback: write manually
+    cat > "$NEWROOT/etc/apt/sources.list.d/radxa.list" << EOF
 deb $RADXA_REPO $DEBIAN_SUITE main
 EOF
+    warn "No Radxa repo found on host — using hardcoded URL"
+fi
 
-# Import Radxa GPG key
-chroot "$NEWROOT" bash -c "
-    wget -qO- $RADXA_KEYRING_URL | gpg --dearmor -o /etc/apt/trusted.gpg.d/radxa.gpg
-" || {
-    # Fallback: copy from host if available
-    if [ -f /etc/apt/trusted.gpg.d/radxa*.gpg ]; then
-        cp /etc/apt/trusted.gpg.d/radxa*.gpg "$NEWROOT/etc/apt/trusted.gpg.d/"
-        ok "Copied Radxa GPG key from host"
-    else
-        warn "Could not fetch Radxa GPG key — vendor packages may fail"
+# Copy all Radxa GPG keys from host
+for keydir in /etc/apt/trusted.gpg.d /etc/apt/keyrings /usr/share/keyrings; do
+    if ls "$keydir"/radxa* 2>/dev/null | head -1; then
+        mkdir -p "$NEWROOT/$keydir"
+        cp "$keydir"/radxa* "$NEWROOT/$keydir/"
+        ok "Copied Radxa GPG keys from $keydir"
     fi
-}
+done
 
 # Also keep standard Debian repo
 cat > "$NEWROOT/etc/apt/sources.list" << EOF
