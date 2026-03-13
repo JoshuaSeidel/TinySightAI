@@ -16,7 +16,8 @@ COMPOSITOR_CTRL_PORT=5290
 WATCHDOG_INTERVAL=10
 WATCHDOG_FAIL_LIMIT=3
 
-USB_POWER_GPIO_NUM=117
+# TODO: Verify correct USB power sense GPIO on Cubie A7Z 40-pin header
+USB_POWER_GPIO_NUM=39
 USB_POWER_GPIO="/sys/class/gpio/gpio${USB_POWER_GPIO_NUM}/value"
 USB_POWER_EXPORT="/sys/class/gpio/export"
 USB_POWER_DIRECTION="/sys/class/gpio/gpio${USB_POWER_GPIO_NUM}/direction"

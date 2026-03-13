@@ -1,21 +1,25 @@
 /*
- * baby_ai.c — AI Baby Monitoring via RK3566 NPU
+ * baby_ai.c — AI Baby Monitoring via Allwinner A733 NPU
  *
- * Uses RKNN C API to run YOLOv8n object detection on camera frames.
+ * Uses VeriSilicon VIPLite API to run YOLOv8n object detection on camera
+ * frames via the VIP9000 NPU (3 TOPS @ INT8 on Allwinner A733).
  * A dedicated inference thread runs at ~1 fps, independent of the
  * 30 fps video pipeline.
  *
- * Build requires: librknnrt (Rockchip RKNN Runtime)
- *   - Header: rknn_api.h (from rknn-toolkit2/runtime)
- *   - Library: librknnrt.so (installed to /usr/lib/)
- *   - Model: YOLOv8n INT8 .rknn file
+ * Build requires: VIPLite runtime (libVIPlite.so, libVIPuser.so)
+ *   - Header: vip_lite.h (from VeriSilicon VIPLite SDK)
+ *   - Libraries: libVIPlite.so, libVIPuser.so
+ *   - Kernel module: galcore.ko (/dev/galcore)
+ *   - Model: YOLOv8n INT8 NBG (.nb) file
  *
- * Model preparation (done once on dev machine):
- *   pip install rknn-toolkit2
- *   yolo export model=yolov8n.pt format=rknn imgsz=640
- *   # or use ultralytics export with rknn format
- *   # produces yolov8n.rknn (~6MB INT8 quantized)
- *   scp yolov8n.rknn radxa:/opt/aadongle/models/baby_detect.rknn
+ * Model preparation (done once on x86 dev machine):
+ *   1. Export YOLOv8n to ONNX:
+ *        yolo export model=yolov8n.pt format=onnx imgsz=640
+ *   2. Convert ONNX → NBG using VeriSilicon Acuity Toolkit:
+ *        acuitylite quantize --model yolov8n.onnx --dtype int8 ...
+ *        acuitylite export --model ... --target vip9000 --format nbg
+ *   3. Deploy:
+ *        scp yolov8n.nb radxa:/opt/aadongle/models/baby_detect.nb
  */
 
 #include "baby_ai.h"
@@ -28,13 +32,13 @@
 #include <time.h>
 #include <math.h>
 
-/* RKNN Runtime API — conditionally included.
- * If building without RKNN SDK, define BABY_AI_STUB to compile a no-op stub. */
+/* VIPLite NPU API — conditionally included.
+ * If building without VIPLite SDK, define BABY_AI_STUB to compile a no-op stub. */
 #ifndef BABY_AI_STUB
-#include <rknn_api.h>
+#include <vip_lite.h>
 #endif
 
-#define DEFAULT_MODEL_PATH "/opt/aadongle/models/baby_detect.rknn"
+#define DEFAULT_MODEL_PATH "/opt/aadongle/models/baby_detect.nb"
 #define MODEL_INPUT_W      640
 #define MODEL_INPUT_H      640
 #define MODEL_INPUT_CH     3
@@ -57,8 +61,11 @@
 
 typedef struct {
 #ifndef BABY_AI_STUB
-    rknn_context    ctx;
-    rknn_input_output_num io_num;
+    vip_network     network;
+    vip_buffer      input_buf;
+    vip_buffer      output_buf;
+    uint8_t        *nbg_data;      /* loaded NBG model data (kept for lifetime) */
+    vip_uint32_t    nbg_size;
 #endif
     bool            model_loaded;
 
@@ -160,13 +167,13 @@ static float compute_motion(const uint8_t *y_cur, const uint8_t *y_prev,
     return total > 0 ? (float)changed / (float)total : 0.0f;
 }
 
-/* ---- RKNN inference ---- */
+/* ---- VIPLite NPU inference ---- */
 
 #ifndef BABY_AI_STUB
 
 static int load_model(const char *path)
 {
-    /* Read model file */
+    /* Read NBG model file */
     FILE *f = fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "baby_ai: cannot open model: %s\n", path);
@@ -176,38 +183,88 @@ static int load_model(const char *path)
     long model_size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    uint8_t *model_data = malloc(model_size);
-    if (!model_data) {
+    g_ai.nbg_data = malloc(model_size);
+    if (!g_ai.nbg_data) {
         fclose(f);
         return -1;
     }
-    if (fread(model_data, 1, model_size, f) != (size_t)model_size) {
-        free(model_data);
+    if (fread(g_ai.nbg_data, 1, model_size, f) != (size_t)model_size) {
+        free(g_ai.nbg_data);
+        g_ai.nbg_data = NULL;
         fclose(f);
         return -1;
     }
     fclose(f);
+    g_ai.nbg_size = (vip_uint32_t)model_size;
 
-    /* Init RKNN context */
-    int ret = rknn_init(&g_ai.ctx, model_data, model_size, 0, NULL);
-    free(model_data);
-
-    if (ret < 0) {
-        fprintf(stderr, "baby_ai: rknn_init failed: %d\n", ret);
+    /* Initialize VIPLite runtime */
+    vip_status_e status = vip_init();
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_init failed: %d\n", status);
+        free(g_ai.nbg_data);
+        g_ai.nbg_data = NULL;
         return -1;
     }
 
-    /* Query I/O count */
-    ret = rknn_query(g_ai.ctx, RKNN_QUERY_IN_OUT_NUM,
-                     &g_ai.io_num, sizeof(g_ai.io_num));
-    if (ret < 0) {
-        fprintf(stderr, "baby_ai: rknn_query failed: %d\n", ret);
-        rknn_destroy(g_ai.ctx);
+    /* Create network from NBG binary */
+    status = vip_create_network(g_ai.nbg_data, g_ai.nbg_size,
+                                VIP_CREATE_NETWORK_FROM_MEMORY,
+                                &g_ai.network);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_create_network failed: %d\n", status);
+        free(g_ai.nbg_data);
+        g_ai.nbg_data = NULL;
+        vip_destroy();
         return -1;
     }
 
-    printf("baby_ai: model loaded (%ld bytes, %d inputs, %d outputs)\n",
-           model_size, g_ai.io_num.n_input, g_ai.io_num.n_output);
+    /* Create input buffer: 640x640x3 UINT8 RGB */
+    vip_buffer_create_params_t in_params;
+    memset(&in_params, 0, sizeof(in_params));
+    in_params.data_format = VIP_BUFFER_FORMAT_TENSOR;
+    in_params.num_of_dims = 4;
+    in_params.sizes[0] = MODEL_INPUT_W;
+    in_params.sizes[1] = MODEL_INPUT_H;
+    in_params.sizes[2] = MODEL_INPUT_CH;
+    in_params.sizes[3] = 1;
+    in_params.data_type = VIP_BUFFER_QUANTIZE_NONE;
+    in_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
+
+    status = vip_create_buffer(&in_params, sizeof(in_params),
+                               &g_ai.input_buf);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_create_buffer (input) failed: %d\n", status);
+        vip_destroy_network(g_ai.network);
+        free(g_ai.nbg_data);
+        g_ai.nbg_data = NULL;
+        vip_destroy();
+        return -1;
+    }
+
+    /* Create output buffer: YOLOv8n output [1, 84, 8400] float32 */
+    vip_buffer_create_params_t out_params;
+    memset(&out_params, 0, sizeof(out_params));
+    out_params.data_format = VIP_BUFFER_FORMAT_TENSOR;
+    out_params.num_of_dims = 3;
+    out_params.sizes[0] = 8400;
+    out_params.sizes[1] = 84;
+    out_params.sizes[2] = 1;
+    out_params.data_type = VIP_BUFFER_QUANTIZE_NONE;
+    out_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
+
+    status = vip_create_buffer(&out_params, sizeof(out_params),
+                               &g_ai.output_buf);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_create_buffer (output) failed: %d\n", status);
+        vip_destroy_buffer(g_ai.input_buf);
+        vip_destroy_network(g_ai.network);
+        free(g_ai.nbg_data);
+        g_ai.nbg_data = NULL;
+        vip_destroy();
+        return -1;
+    }
+
+    printf("baby_ai: model loaded (%ld bytes, VIP9000 NPU)\n", model_size);
 
     g_ai.model_loaded = true;
     return 0;
@@ -216,54 +273,61 @@ static int load_model(const char *path)
 /*
  * Run YOLOv8n inference on an RGB image.
  * Parses the output tensor for person detections.
- *
- * Updates g_ai.status (caller must hold status_lock or call post-process).
  */
 static void run_inference(const uint8_t *rgb, int w, int h,
                            baby_ai_status_t *result)
 {
     if (!g_ai.model_loaded) return;
 
-    /* Set input */
-    rknn_input inputs[1];
-    memset(inputs, 0, sizeof(inputs));
-    inputs[0].index = 0;
-    inputs[0].type = RKNN_TENSOR_UINT8;
-    inputs[0].size = w * h * 3;
-    inputs[0].fmt = RKNN_TENSOR_NHWC;
-    inputs[0].buf = (void *)rgb;
+    vip_status_e status;
 
-    int ret = rknn_inputs_set(g_ai.ctx, 1, inputs);
-    if (ret < 0) {
-        fprintf(stderr, "baby_ai: rknn_inputs_set failed: %d\n", ret);
+    /* Copy RGB data into input buffer */
+    void *in_ptr = NULL;
+    status = vip_map_buffer(g_ai.input_buf, &in_ptr);
+    if (status != VIP_SUCCESS || !in_ptr) {
+        fprintf(stderr, "baby_ai: vip_map_buffer (input) failed: %d\n", status);
+        return;
+    }
+    memcpy(in_ptr, rgb, (size_t)w * h * 3);
+    vip_unmap_buffer(g_ai.input_buf);
+
+    /* Bind input/output and run network */
+    status = vip_set_input(g_ai.network, 0, g_ai.input_buf);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_set_input failed: %d\n", status);
         return;
     }
 
-    /* Run */
-    ret = rknn_run(g_ai.ctx, NULL);
-    if (ret < 0) {
-        fprintf(stderr, "baby_ai: rknn_run failed: %d\n", ret);
+    status = vip_set_output(g_ai.network, 0, g_ai.output_buf);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_set_output failed: %d\n", status);
         return;
     }
 
-    /* Get outputs */
-    rknn_output outputs[3]; /* YOLOv8 typically has 3 output tensors */
-    memset(outputs, 0, sizeof(outputs));
-    for (int i = 0; i < (int)g_ai.io_num.n_output && i < 3; i++) {
-        outputs[i].index = i;
-        outputs[i].want_float = 1; /* dequantize to float */
+    status = vip_run_network(g_ai.network);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_run_network failed: %d\n", status);
+        return;
     }
 
-    ret = rknn_outputs_get(g_ai.ctx, g_ai.io_num.n_output, outputs, NULL);
-    if (ret < 0) {
-        fprintf(stderr, "baby_ai: rknn_outputs_get failed: %d\n", ret);
+    status = vip_finish_network(g_ai.network);
+    if (status != VIP_SUCCESS) {
+        fprintf(stderr, "baby_ai: vip_finish_network failed: %d\n", status);
+        return;
+    }
+
+    /* Read output data */
+    void *out_ptr = NULL;
+    status = vip_map_buffer(g_ai.output_buf, &out_ptr);
+    if (status != VIP_SUCCESS || !out_ptr) {
+        fprintf(stderr, "baby_ai: vip_map_buffer (output) failed: %d\n", status);
         return;
     }
 
     /*
      * Parse YOLOv8 output for person detections.
      *
-     * YOLOv8n output format (after RKNN export):
+     * YOLOv8n output format (after Acuity/NBG export):
      *   output[0]: [1, 84, 8400] — 8400 detection candidates
      *     Each candidate: [x_center, y_center, width, height, class_scores[80]]
      *
@@ -271,7 +335,7 @@ static void run_inference(const uint8_t *rgb, int w, int h,
      * The baby is detected as a "person" — we use bbox size relative to
      * frame to distinguish baby (small person in back seat) from adults.
      */
-    float *out_data = (float *)outputs[0].buf;
+    float *out_data = (float *)out_ptr;
     int num_candidates = 8400;
     int num_classes = 80;
     int stride = 4 + num_classes; /* x, y, w, h, class_scores */
@@ -291,6 +355,8 @@ static void run_inference(const uint8_t *rgb, int w, int h,
             best_h = det[3];
         }
     }
+
+    vip_unmap_buffer(g_ai.output_buf);
 
     /* Update result */
     if (best_conf > CONF_THRESHOLD) {
@@ -315,9 +381,6 @@ static void run_inference(const uint8_t *rgb, int w, int h,
         result->confidence = 0.0f;
         result->face_visible = false;
     }
-
-    /* Release outputs */
-    rknn_outputs_release(g_ai.ctx, g_ai.io_num.n_output, outputs);
 }
 
 #else /* BABY_AI_STUB */
@@ -325,7 +388,7 @@ static void run_inference(const uint8_t *rgb, int w, int h,
 static int load_model(const char *path)
 {
     (void)path;
-    printf("baby_ai: STUB mode — no RKNN runtime, AI features disabled\n");
+    printf("baby_ai: STUB mode — no VIPLite runtime, AI features disabled\n");
     return -1;
 }
 
@@ -428,7 +491,7 @@ int baby_ai_init(const char *model_path)
         return -1;
     }
 
-    /* Load RKNN model */
+    /* Load NBG model for VIP9000 NPU */
     const char *path = model_path ? model_path : DEFAULT_MODEL_PATH;
     if (load_model(path) < 0) {
         printf("baby_ai: model not loaded — motion detection only\n");
@@ -501,9 +564,14 @@ void baby_ai_destroy(void)
 
 #ifndef BABY_AI_STUB
     if (g_ai.model_loaded) {
-        rknn_destroy(g_ai.ctx);
+        vip_destroy_buffer(g_ai.input_buf);
+        vip_destroy_buffer(g_ai.output_buf);
+        vip_destroy_network(g_ai.network);
         g_ai.model_loaded = false;
     }
+    free(g_ai.nbg_data);
+    g_ai.nbg_data = NULL;
+    vip_destroy();
 #endif
 
     free(g_ai.frame_buf);

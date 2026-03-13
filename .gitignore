@@ -12,6 +12,7 @@ __pycache__/
 *.elf
 build/
 *.rknn
+*.nb
 
 # IDE
 .vscode/

@@ -332,8 +332,11 @@ static void *control_thread(void *arg)
 
 /* ---- IR LED control ---- */
 
-/* GPIO3_D4 = (3*32) + (3*8) + 4 = 124 on Radxa Zero 3W */
-#define IR_LED_GPIO 124
+/* Radxa Cubie A7Z (Allwinner A733) GPIO for IR LEDs
+ * TODO: Verify correct GPIO pin on Cubie A7Z 40-pin header.
+ * Allwinner GPIO formula: P{letter}{num} = num + 32 * letter_index
+ * PB7 = 7 + 32*1 = 39 (placeholder — verify on actual hardware) */
+#define IR_LED_GPIO 39
 
 /*
  * Control channel callback: translate string commands to ir_led API.

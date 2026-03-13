@@ -7,15 +7,15 @@ working system.
 
 ## Phase 0: Pre-assembly (on your dev machine)
 
-- [ ] Download Radxa Zero 3W official Debian image
-      https://github.com/radxa-build/radxa-zero3/releases
+- [ ] Download Radxa Cubie A7Z official Debian image
+      https://github.com/radxa-build/radxa-a733/releases
 - [ ] Flash image to high-endurance microSD with `balenaEtcher` or `dd`
 - [ ] Download ESP-IDF v5.x toolchain (for T-Dongle firmware)
       https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/
 
 ---
 
-## Phase 1: Radxa Zero 3W initial setup
+## Phase 1: Radxa Cubie A7Z initial setup
 
 ### 1.1 First boot (stock Debian)
 - [ ] Insert microSD, connect USB-C power + ethernet (or HDMI + keyboard)
@@ -32,7 +32,7 @@ sudo bash radxa/scripts/setup.sh
 ```
 This builds ALL components (~20-30 min on first run):
 - [2/10] System packages (hostapd, bluez, v4l-utils, MPP, RGA, etc.)
-- [3/10] Rockchip MPP + ffmpeg-rockchip (hardware codecs)
+- [3/10] Allwinner CedarVE (hardware codecs)
 - [4/10] aa-proxy (Rust — installs rustup if needed)
 - [5/10] Compositor (C — links against MPP/RGA)
 - [6/10] CarPlay stack (C — links against openssl, avahi, bluez, ffmpeg)
@@ -81,11 +81,11 @@ sudo mount -o remount,ro /overlay/lower
 
 ---
 
-## Phase 2: Camera (Arducam IMX219 NoIR)
+## Phase 2: Camera (Radxa Camera 4K)
 
 ### 2.1 Connect
 - [ ] Power off Radxa
-- [ ] Connect IMX219 to 22-pin CSI connector (gold contacts face PCB)
+- [ ] Connect Radxa Camera 4K to 31-pin CSI connector (gold contacts face PCB)
 - [ ] Power on
 
 ### 2.2 Verify
@@ -243,7 +243,7 @@ sudo i2cget -y 3 0x10 0x00
 ### 7.2 Assemble (bottom to top)
 1. GoPro 2-prong mount (clips into body base)
 2. MFi breakout board (sits in middle slot)
-3. Radxa Zero 3W (press-fit, USB-C accessible from side)
+3. Radxa Cubie A7Z (press-fit, USB-C accessible from side)
 4. Camera module + IR LEDs (mount in lid, ribbon cable threads through)
 5. Snap lid onto body
 

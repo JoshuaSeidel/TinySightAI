@@ -7,8 +7,9 @@ After=sysinit.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/bin/gpioset gpiochip0 124=1
-ExecStop=/usr/bin/gpioset gpiochip0 124=0
+# TODO: Verify gpiochip number and pin on Cubie A7Z (Allwinner may use gpiochip0 or gpiochip1)
+ExecStart=/usr/bin/gpioset gpiochip0 39=1
+ExecStop=/usr/bin/gpioset gpiochip0 39=0
 
 [Install]
 WantedBy=aadongle.target

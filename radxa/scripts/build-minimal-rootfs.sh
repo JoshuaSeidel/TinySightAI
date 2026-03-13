@@ -6,7 +6,7 @@
 # containing ONLY what's needed to run the AADongle system.
 #
 # Prerequisites:
-#   1. Running on Radxa Zero 3W with stock Debian image
+#   1. Running on Radxa Cubie A7Z with stock Debian image
 #   2. setup.sh has already been run (all binaries compiled)
 #   3. At least 512MB free RAM (for tmpfs build area)
 #
@@ -40,9 +40,10 @@ CONFIG_DIR="$RADXA_DIR/config"
 INSTALL_DIR="/opt/aadongle"
 
 NEWROOT="/mnt/newroot"
-DEBIAN_SUITE="bookworm"
+# Auto-detect Debian suite from running system (Cubie A7Z ships with Bullseye)
+DEBIAN_SUITE=$(lsb_release -cs 2>/dev/null || echo "bullseye")
 DEBIAN_MIRROR="http://deb.debian.org/debian"
-RADXA_REPO="https://radxa-repo.github.io/bookworm"
+RADXA_REPO="https://radxa-repo.github.io/${DEBIAN_SUITE}"
 RADXA_KEYRING="/usr/share/keyrings/radxa-archive-keyring-2022.gpg"
 
 DRY_RUN=false
@@ -190,12 +191,10 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     v4l-utils gpiod i2c-tools \
     `# DRM` \
     libdrm2 \
-    `# CarPlay shared libs` \
-    libssl3 \
+    `# CarPlay shared libs (version depends on Debian suite)` \
     libavahi-client3 libavahi-common3 \
     libbluetooth3 libdbus-1-3 \
     libasound2 \
-    libavcodec59 libavutil57 \
     `# ustreamer runtime` \
     libevent-2.1-7 libjpeg62-turbo libbsd0 \
     `# Python (bt-agent, baby-monitor, ota, config server)` \
@@ -206,27 +205,37 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     rsync wget \
     2>&1 | tail -5
 
-# Rockchip vendor packages — try apt first, fall back to copying from host
-step "  Installing Rockchip vendor packages..."
-if chroot "$NEWROOT" apt-get install -y --no-install-recommends \
-    librockchip-mpp1 librga2 2>/dev/null; then
-    ok "Rockchip packages installed via apt"
-else
-    warn "Rockchip packages not in chroot apt — copying libraries from host"
-    # Copy MPP libs
-    for lib in /usr/lib/aarch64-linux-gnu/librockchip_mpp*; do
-        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/"
-    done
-    # Copy RGA libs
-    for lib in /usr/lib/aarch64-linux-gnu/librga*; do
-        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/"
-    done
-    # Also check /usr/lib/ directly
-    for lib in /usr/lib/librockchip_mpp* /usr/lib/librga*; do
-        [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/"
-    done
-    ok "Rockchip libraries copied from host"
-fi
+# Version-dependent shared libraries (differ between Bullseye and Bookworm)
+step "  Installing version-dependent shared libraries..."
+case "$DEBIAN_SUITE" in
+    bullseye)
+        chroot "$NEWROOT" apt-get install -y --no-install-recommends \
+            libssl1.1 libavcodec58 libavutil56 2>&1 | tail -3
+        ;;
+    bookworm|*)
+        chroot "$NEWROOT" apt-get install -y --no-install-recommends \
+            libssl3 libavcodec59 libavutil57 2>&1 | tail -3
+        ;;
+esac
+ok "Version-dependent libraries installed"
+
+# Allwinner vendor libraries — copy from host (cedarc, G2D, etc.)
+step "  Copying Allwinner vendor libraries from host..."
+for lib in /usr/lib/aarch64-linux-gnu/libcedar* \
+           /usr/lib/aarch64-linux-gnu/libaw* \
+           /usr/lib/aarch64-linux-gnu/libg2d* \
+           /usr/lib/libcedar* /usr/lib/libaw* /usr/lib/libg2d*; do
+    [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/" 2>/dev/null || true
+done
+ok "Allwinner vendor libraries copied (if present)"
+
+# VeriSilicon VIPLite NPU runtime (VIP9000 — baby AI inference)
+for lib in /usr/lib/aarch64-linux-gnu/libVIPlite* \
+           /usr/lib/aarch64-linux-gnu/libVIPuser* \
+           /usr/lib/libVIPlite* /usr/lib/libVIPuser*; do
+    [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/" 2>/dev/null || true
+done
+ok "VIPLite NPU libraries copied (if present)"
 
 ok "Runtime packages installed ($(chroot "$NEWROOT" dpkg --list | grep '^ii' | wc -l) packages)"
 
@@ -258,7 +267,7 @@ ok "Firmware blobs copied"
 step "[5/9] Installing AADongle binaries and scripts..."
 
 # Create directory tree
-mkdir -p "$NEWROOT/opt/aadongle/"{bin,scripts,baby-monitor,ota-server,web,firmware,config}
+mkdir -p "$NEWROOT/opt/aadongle/"{bin,scripts,baby-monitor,ota-server,web,firmware,config,models}
 
 # Binaries
 for bin in compositor aa-proxy carplay-stack ustreamer; do
@@ -293,6 +302,14 @@ fi
 # Config web server
 if [ -d "$RADXA_DIR/web" ]; then
     cp -r "$RADXA_DIR/web/"* "$NEWROOT/opt/aadongle/web/"
+fi
+
+# AI model file (NBG format for VIP9000 NPU)
+if [ -f "$INSTALL_DIR/models/baby_detect.nb" ]; then
+    cp "$INSTALL_DIR/models/baby_detect.nb" "$NEWROOT/opt/aadongle/models/"
+    ok "AI model (baby_detect.nb) copied"
+else
+    warn "AI model not found at $INSTALL_DIR/models/baby_detect.nb — deploy manually later"
 fi
 
 ok "All AADongle files installed"
@@ -357,7 +374,7 @@ mkdir -p "$NEWROOT/etc/systemd/journald.conf.d"
 cp "$CONFIG_DIR/journald-volatile.conf" "$NEWROOT/etc/systemd/journald.conf.d/volatile.conf"
 
 # fstab — auto-detect root device, tmpfs mounts
-ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || echo "/dev/mmcblk1p3")
+ROOT_DEV=$(findmnt -n -o SOURCE / 2>/dev/null || echo "/dev/mmcblk0p3")
 cat > "$NEWROOT/etc/fstab" << EOF
 # <device>    <mount>     <type>  <options>                     <dump> <pass>
 ${ROOT_DEV}     /         ext4    noatime,errors=remount-ro     0      1

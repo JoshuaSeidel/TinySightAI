@@ -1,6 +1,6 @@
 # Baby-Cam
 
-Wireless Android Auto / CarPlay dongle with split-screen baby monitoring for your car. Built from scratch on a Radxa Zero 3W (RK3566) and LilyGO T-Dongle-S3 (ESP32-S3).
+Wireless Android Auto / CarPlay dongle with split-screen baby monitoring for your car. Built from scratch on a Radxa Cubie A7Z (Allwinner A733) and LilyGO T-Dongle-S3 (ESP32-S3).
 
 The car always sees a standard Android Auto device. Behind the scenes, the Radxa intercepts the video stream, composites it with a live baby camera feed, and sends the combined frame back to the car's head unit in real time.
 
@@ -8,7 +8,7 @@ The car always sees a standard Android Auto device. Behind the scenes, the Radxa
 
 - **Android Auto + Baby Cam split-screen** on your car's existing head unit
 - **CarPlay support** via custom MFi chip + AirPlay receiver (no Carlinkit dongle)
-- **AI baby monitoring** — detects sleeping, absent, or distress states via RK3566 NPU
+- **AI baby monitoring** — detects sleeping, absent, or distress states via 3 TOPS NPU
 - **IR night vision** — auto-brightness 850nm LEDs for low-light viewing
 - **Phone web UI** at `http://192.168.4.1:8080` — live MJPEG stream, pinch-to-zoom, mode switching, AI alerts
 - **Touch controls on the car screen** — overlay buttons for mode cycling and zoom
@@ -20,16 +20,16 @@ The car always sees a standard Android Auto device. Behind the scenes, the Radxa
 ```
                           WiFi 5GHz (hidden AP)
     ┌──────────┐        ┌─────────────────────────────────┐
-    │  Phone   │◄──────►│         Radxa Zero 3W           │
+    │  Phone   │◄──────►│        Radxa Cubie A7Z          │
     │ (AA/CP)  │        │                                 │
     └──────────┘        │  aa-proxy ◄─► compositor ◄─► camera
                         │     │            │                │
                         │     │      ┌─────┴─────┐         │
-                        │     │      │ RGA + MPP  │   IR LEDs
+                        │     │      │G2D+CedarVE│   IR LEDs
                         │     │      │ (HW codec) │         │
                         │     │      └─────┬─────┘         │
                         │     │            │          baby_ai
-                        │     ▼            │          (NPU)
+                        │     ▼            │        (3T NPU)
                         └────────┬─────────┘
                                  │ WiFi
                         ┌────────▼────────┐
@@ -48,9 +48,9 @@ The car always sees a standard Android Auto device. Behind the scenes, the Radxa
 
 | Part | Role | Notes |
 |------|------|-------|
-| **Radxa Zero 3W 1GB** | Brain | RK3566, WiFi 6, BT 5.4, CSI, USB OTG |
+| **Radxa Cubie A7Z 1GB** | Brain | Allwinner A733, WiFi 6, BT 5.4, 31-pin CSI, 3T NPU |
 | **LilyGO T-Dongle-S3** | USB bridge | ESP32-S3, USB-A plug, plugs into car |
-| **Arducam IMX219 NoIR 175°** | Baby camera | 8MP ultra-wide, CSI, no IR filter |
+| **Radxa Camera 4K (2.1mm)** | Baby camera | IMX415 8.29MP, 4K, wide-angle M12 lens |
 | **MFi auth chip** | CarPlay auth | Salvaged from MFi accessory, I2C breakout |
 | **5mm 850nm IR LEDs** | Night vision | 20mA each, GPIO-driven with 68Ω resistor |
 | **High-endurance 32GB microSD** | Storage | Minimal rootfs + persistent /data partition |
@@ -90,14 +90,14 @@ baby-cam/
 │   ├── compositor/             # C — hardware video pipeline
 │   │   └── src/
 │   │       ├── main.c          # Thread management, lifecycle
-│   │       ├── pipeline.c      # MPP decode → RGA composite → MPP encode
-│   │       ├── camera.c        # V4L2 IMX219 capture + zoom
+│   │       ├── pipeline.c      # CedarVE decode → G2D composite → CedarVE encode
+│   │       ├── camera.c        # V4L2 IMX415 capture + zoom
 │   │       ├── overlay.c       # On-screen icons + AI indicator
 │   │       ├── touch.c         # Car touchscreen coordinate remapping
 │   │       ├── control_channel.c # TCP/Unix command dispatch
 │   │       ├── mode.c          # Display mode state machine
 │   │       ├── ir_led.c        # GPIO IR LED + auto-brightness
-│   │       ├── baby_ai.c       # RKNN NPU inference (YOLOv8n)
+│   │       ├── baby_ai.c       # NPU inference (YOLOv8n, 3 TOPS)
 │   │       ├── aa_video_input.c  # Receive tapped AA H.264 frames
 │   │       ├── aa_video_output.c # Send composited frames back
 │   │       ├── aa_emulator.c   # Emulate AA device for CarPlay wrapping
@@ -169,11 +169,11 @@ baby-cam/
 
 ## Video Pipeline
 
-All video processing is hardware-accelerated on the RK3566:
+All video processing is hardware-accelerated on the Allwinner A733:
 
 ```
-Phone H.264 ──► RKVDEC2 decode ──► YUV frame ─┐
-                                                ├──► RGA composite ──► Hantro H1 encode ──► H.264 out
+Phone H.264 ──► CedarVE decode ──► YUV frame ─┐
+                                                ├──► G2D composite ──► CedarVE encode ──► H.264 out
 Camera NV12 ──────────────────────► YUV frame ─┘
                                                          │
                                                     overlay icons
@@ -182,19 +182,19 @@ Camera NV12 ──────────────────────�
 
 | Stage | Hardware | Latency |
 |-------|----------|---------|
-| Decode | RKVDEC2 | 5-8ms |
-| Composite | RGA 2D engine | 2-3ms |
-| Overlay | RGA alpha blend | <1ms |
-| Encode | Hantro H1 | 5-8ms |
-| **Total** | | **~15-20ms** |
+| Decode | CedarVE (8K capable) | 3-5ms |
+| Composite | G2D 2D engine | 2-3ms |
+| Overlay | G2D alpha blend | <1ms |
+| Encode | CedarVE (4K@30 capable) | 3-5ms |
+| **Total** | | **~10-15ms** |
 
 Output is always 1280x720 H.264 @ 30fps (Android Auto protocol requirement).
 
 ## AI Baby Monitoring
 
-Runs on the RK3566's built-in NPU (0.8-1.0 TOPS):
+Runs on the A733's built-in NPU (3 TOPS @ INT8):
 
-- **Model**: YOLOv8n INT8 RKNN (~6MB, ~50ms inference)
+- **Model**: YOLOv8n INT8 (~6MB, ~20ms inference)
 - **Inference rate**: ~1 fps in a dedicated thread (doesn't affect video pipeline)
 - **Detections**:
   - Baby present / absent
@@ -245,7 +245,7 @@ The compositor samples the camera frame's Y-plane brightness every second. When 
 
 ### Prerequisites
 
-- Radxa Zero 3W running Debian Bookworm (Radxa official image)
+- Radxa Cubie A7Z running Debian (Radxa official image from radxa-a733 releases)
 - ESP-IDF v5.x for T-Dongle firmware
 - Rust toolchain for aa-proxy
 
@@ -347,7 +347,7 @@ SD Card (32GB):
 65x30mm footprint (matches Radxa board), ~25mm tall. Stacked design:
 
 1. **Base**: GoPro 2-prong mount (clips to car mount)
-2. **Middle**: MFi breakout PCB + Radxa Zero 3W
+2. **Middle**: MFi breakout PCB + Radxa Cubie A7Z
 3. **Lid**: Camera window + IR LED slots, snap-fit closure
 
 Print in PETG or ABS. STL files in `enclosure/`.
@@ -364,5 +364,5 @@ Built with reference to these open-source projects:
 - [WirelessAndroidAutoDongle](https://github.com/nicholasbalasus/WirelessAndroidAutoDongle) — RPi AA dongle reference
 - [uStreamer](https://github.com/pikvm/ustreamer) — MJPEG streamer
 - [RPiPlay](https://github.com/FD-/RPiPlay) / shairplay — AirPlay receiver
-- [ffmpeg-rockchip](https://github.com/nyanmisaka/ffmpeg-rockchip) — RK3566 hardware codec
+- [FFmpeg V4L2 M2M](https://trac.ffmpeg.org/wiki/HWAccelIntro) — Allwinner CedarVE hardware codec via V4L2
 - [libimobiledevice](https://github.com/libimobiledevice) — Apple protocol implementations

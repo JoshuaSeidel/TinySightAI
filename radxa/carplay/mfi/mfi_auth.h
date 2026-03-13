@@ -10,18 +10,18 @@
  * The chip handles RSA signing internally — we never see the private key.
  *
  * Wiring (QFN-20):
- *   Pin 13 (SDA) → Radxa Phys Pin 3 (I2C3_SDA)
- *   Pin 12 (SCL) → Radxa Phys Pin 5 (I2C3_SCL)
+ *   Pin 13 (SDA) → Radxa Cubie A7Z Phys Pin 3 (TWI7_SDA / PJ23)
+ *   Pin 12 (SCL) → Radxa Cubie A7Z Phys Pin 5 (TWI7_SCL / PJ22)
  *   Pin 4  (VCC) → 3.3V
  *   Pin 11 (VSS) → GND
  *   Pin 5  (nRESET) → 3.3V (HIGH = normal)
  *   Pin 2  (MODE1) → 3.3V (HIGH = I2C mode)
  *
- * I2C bus: /dev/i2c-3 on Radxa Zero 3W
- * I2C address: 0x10 (verify with i2cdetect -y 3)
+ * I2C bus: /dev/i2c-7 on Radxa Cubie A7Z (TWI7, enable via rsetup overlay)
+ * I2C address: 0x10 (verify with i2cdetect -y 7)
  */
 
-#define MFI_I2C_BUS      "/dev/i2c-3"
+#define MFI_I2C_BUS      "/dev/i2c-7"
 #define MFI_I2C_ADDR     0x10
 
 /* MFi register map (approximate — varies slightly by chip version) */

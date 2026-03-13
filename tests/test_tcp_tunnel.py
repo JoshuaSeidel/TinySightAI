@@ -3,7 +3,7 @@
 test_tcp_tunnel.py — TCP Tunnel Between T-Dongle and Radxa
 
 Tests the TCP tunnel that carries USB AOA data between the T-Dongle-S3
-firmware and the Radxa Zero 3W compositor.
+firmware and the Radxa Cubie A7Z compositor.
 
 Tunnel parameters:
     Host:  127.0.0.1 (localhost for testing, 192.168.4.1 in production)

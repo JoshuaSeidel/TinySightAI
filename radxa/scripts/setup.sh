@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# AADongle Radxa Zero 3W — Complete Setup Script
+# AADongle Radxa Cubie A7Z — Complete Setup Script
 # Builds and installs ALL project components from source.
 #
 # Usage: sudo bash setup.sh
@@ -42,7 +42,7 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-banner "AADongle Radxa Zero 3W — Full Setup"
+banner "AADongle Radxa Cubie A7Z — Full Setup"
 echo "  Project root : $PROJECT_DIR"
 echo "  Radxa dir    : $RADXA_DIR"
 echo "  Install dir  : $INSTALL_DIR"
@@ -88,9 +88,7 @@ apt-get install -y \
     i2c-tools \
     `# Build tools` \
     cmake pkg-config nasm \
-    `# MPP / RGA (Rockchip hardware codecs)` \
-    librockchip-mpp-dev librockchip-mpp1 \
-    librga-dev librga2 \
+    `# Allwinner VPU / G2D (hardware video + 2D accel)` \
     libdrm-dev \
     `# Compositor link dependencies` \
     libpthread-stubs0-dev \
@@ -113,6 +111,16 @@ apt-get install -y \
 
 ok "All system packages installed"
 record_ok "System packages"
+
+# Check for VeriSilicon VIPLite NPU runtime (VIP9000 on Allwinner A733)
+if [ -f /usr/lib/libVIPlite.so ] || [ -f /usr/lib/aarch64-linux-gnu/libVIPlite.so ]; then
+    ok "VIPLite NPU runtime found — AI inference will use VIP9000 NPU"
+    record_ok "VIPLite NPU runtime"
+else
+    warn "VIPLite NPU runtime (libVIPlite.so) not found — AI features will build as stub"
+    warn "Install VIPLite SDK from Radxa/Allwinner vendor packages if NPU support is needed"
+    record_warn "VIPLite NPU runtime: not found (AI stub mode)"
+fi
 
 # Immediately stop hostapd/dnsmasq if apt postinst auto-started them.
 # They depend on the ap0 virtual interface which doesn't exist yet.
@@ -160,7 +168,8 @@ mkdir -p \
     "$INSTALL_DIR/ota-server" \
     "$INSTALL_DIR/firmware" \
     "$INSTALL_DIR/config" \
-    "$INSTALL_DIR/scripts"
+    "$INSTALL_DIR/scripts" \
+    "$INSTALL_DIR/models"
 ok "Directory tree created under $INSTALL_DIR"
 
 # =============================================================================
@@ -282,19 +291,31 @@ record_ok "avahi-daemon (CarPlay mDNS)"
 # =============================================================================
 # STEP 7 — Camera overlay
 # =============================================================================
-step "[6/10] Configuring IMX219 camera overlay..."
-if [ -f /boot/dtbo/radxa-zero3-imx219.dtbo ]; then
-    if ! grep -q "radxa-zero3-imx219" /boot/uEnv.txt 2>/dev/null; then
-        echo "overlays=radxa-zero3-imx219" >> /boot/uEnv.txt
-        ok "IMX219 overlay added to /boot/uEnv.txt (reboot required)"
-    else
-        ok "IMX219 overlay already present in /boot/uEnv.txt"
+step "[6/10] Configuring Radxa Camera 4K (IMX415) overlay..."
+# Try to find the camera 4K overlay — name varies by firmware version
+CAM4K_OVERLAY=""
+for candidate in \
+    /boot/dtbo/radxa-camera-4k.dtbo \
+    /boot/dtbo/cubie-a7z-camera-4k.dtbo \
+    /boot/dtbo/radxa-cubie-a7z-camera-4k.dtbo; do
+    if [ -f "$candidate" ]; then
+        CAM4K_OVERLAY="$candidate"
+        break
     fi
-    record_ok "IMX219 camera overlay"
+done
+
+if [ -n "$CAM4K_OVERLAY" ]; then
+    OVERLAY_NAME=$(basename "$CAM4K_OVERLAY" .dtbo)
+    if ! grep -q "$OVERLAY_NAME" /boot/uEnv.txt 2>/dev/null; then
+        echo "overlays=$OVERLAY_NAME" >> /boot/uEnv.txt
+        ok "Camera 4K overlay ($OVERLAY_NAME) added to /boot/uEnv.txt (reboot required)"
+    else
+        ok "Camera 4K overlay already present in /boot/uEnv.txt"
+    fi
+    record_ok "Radxa Camera 4K overlay"
 else
-    warn "IMX219 dtbo not found at /boot/dtbo/radxa-zero3-imx219.dtbo"
-    warn "Run 'sudo rsetup' → Overlays → Enable radxa-zero3-imx219 after setup"
-    record_warn "IMX219 overlay: set manually via rsetup"
+    warn "Camera 4K dtbo not found — use 'sudo rsetup' → Overlays → Enable Radxa Camera 4K"
+    record_warn "Camera 4K overlay: set manually via rsetup"
 fi
 
 # Ensure v4l2 modules are loaded at boot
@@ -308,7 +329,7 @@ ok "v4l2 modules registered"
 # =============================================================================
 
 # -----------------------------------------------------------------------
-# 8a. Compositor (C, links to librockchip_mpp + librga + libdrm)
+# 8a. Compositor (C, links to libdrm + Allwinner VPU/G2D)
 # -----------------------------------------------------------------------
 step "[7/10] Building compositor..."
 cd "$RADXA_DIR/compositor"
@@ -538,14 +559,14 @@ echo "  $INSTALL_DIR/bin/ir-led-control.sh  — IR LED auto-brightness controlle
 echo "  $INSTALL_DIR/scripts/power-manager.sh — watchdog + power monitor"
 echo "  $INSTALL_DIR/baby-monitor/          — web UI + API server"
 echo "  $INSTALL_DIR/ota-server/            — OTA firmware update server"
+echo "  $INSTALL_DIR/models/                — AI model files (.nb NBG format)"
 echo "  $INSTALL_DIR/firmware/              — OTA firmware staging area"
 echo ""
 echo -e "${CYN}Next steps:${RST}"
 echo "  1. Reboot so camera overlay, IP forwarding, and module changes take effect."
-echo "  2. If IMX219 overlay was not auto-applied: sudo rsetup → Overlays → radxa-zero3-imx219"
+echo "  2. If Camera 4K overlay was not auto-applied: sudo rsetup → Overlays → Enable Radxa Camera 4K"
 echo "  3. Connect T-Dongle-S3 to car USB-A, phone to hidden SSID 'AADongle'."
 echo "  4. Monitor services: journalctl -fu aa-bridge  |  journalctl -fu carplay"
 echo "  5. Check WiFi AP: iw dev ap0 info  |  hostapd_cli status"
-echo "  6. Optional: sudo bash $SCRIPT_DIR/install-mpp.sh   (builds ffmpeg-rockchip)"
-echo "  7. For production: sudo bash $SCRIPT_DIR/make-readonly.sh (read-only root, hard power safe)"
+echo "  6. For production: sudo bash $SCRIPT_DIR/make-readonly.sh (read-only root, hard power safe)"
 echo ""

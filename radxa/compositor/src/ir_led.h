@@ -2,7 +2,7 @@
 /*
  * ir_led.h — IR LED control via GPIO with auto-brightness detection
  *
- * Controls 850nm IR LEDs wired to a Radxa Zero 3W GPIO pin.
+ * Controls 850nm IR LEDs wired to a Radxa Cubie A7Z GPIO pin.
  * Three modes:
  *   auto — sample camera frame brightness, toggle LEDs when dark
  *   on   — always on
@@ -24,7 +24,7 @@ typedef enum {
 
 /**
  * Initialise GPIO for IR LED control.
- * gpio_num: Linux GPIO number (124 = GPIO3_D4 on Radxa Zero 3W).
+ * gpio_num: Linux GPIO number (39 = PB7 on Radxa Cubie A7Z — verify on hardware).
  * Returns 0 on success, -1 on failure (non-fatal — runs in dry-run mode).
  */
 int ir_led_init(int gpio_num);

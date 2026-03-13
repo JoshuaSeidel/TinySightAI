@@ -4,8 +4,8 @@
 
 | Component | Model | Role |
 |---|---|---|
-| **Brain** | Radxa Zero 3W 1GB (RK3566, WiFi 6, BT 5.4) | AA/CarPlay proxy, WiFi AP, camera host, video compositor |
-| **Camera** | Arducam IMX219 NoIR Ultra Wide (8MP, CSI) | Baby monitor with night vision |
+| **Brain** | Radxa Cubie A7Z 1GB (Allwinner A733, WiFi 6, BT 5.4, 3T NPU) | AA/CarPlay proxy, WiFi AP, camera host, video compositor |
+| **Camera** | Radxa Camera 4K (IMX415, 2.1mm wide-angle, M12 mount) | Baby monitor with 4K resolution |
 | **USB Dongle** | LilyGO T-Dongle-S3 (ESP32-S3, USB-A) | USB bridge at car port |
 | **MFi Chip** | Apple MFI341S2164 (QFN-20, I2C breakout) | CarPlay authentication |
 | **IR LEDs** | 850nm IR LED module (2x) | Night vision illumination |
@@ -18,14 +18,14 @@ LEDs provide invisible illumination that the NoIR sensor picks up, giving clear
 night vision without disturbing the baby.
 
 ### Why Debian (Not Alpine)
-Radxa Zero 3W's vendor kernel (required for RK3566 hardware video codecs, CSI
+Radxa Cubie A7Z's vendor kernel (required for A733 hardware video codecs, CSI
 camera driver, RGA compositor) only ships for Debian. Alpine uses musl libc
 which breaks prebuilt Rockchip MPP libraries. We trim Debian instead: disable
 unused services, remove desktop packages, target ~200MB RAM idle.
 
 ### MFi Chip Wiring — MFI341S2164 (QFN-20)
 
-| QFN-20 Pin | Signal | Radxa Zero 3W | Notes |
+| QFN-20 Pin | Signal | Radxa Cubie A7Z | Notes |
 |---|---|---|---|
 | Pin 13 | SDA (I2C Data) | Phys Pin 3 (I2C3_SDA) | |
 | Pin 12 | SCL (I2C Clock) | Phys Pin 5 (I2C3_SCL) | |
@@ -34,7 +34,7 @@ unused services, remove desktop packages, target ~200MB RAM idle.
 | Pin 5 | nRESET | Phys Pin 1 (3.3V) | HIGH = normal operation |
 | Pin 2 | MODE1 | 3.3V | HIGH = I2C mode |
 
-**I2C bus**: `/dev/i2c-3` (Radxa uses I2C3 on pins 3/5, not I2C1 like RPi)
+**I2C bus**: `/dev/i2c-7` (Radxa uses I2C3 on pins 3/5, not I2C1 like RPi)
 **I2C address**: `0x10` (verify with `i2cdetect -y 3`)
 
 All CarPlay software is built and ready — solder the chip to a QFN-20
@@ -47,14 +47,14 @@ breakout board, wire 6 connections, and it works.
 ```
  CAR USB-A                              BACKSEAT
  ┌──────────────┐     WiFi 5GHz        ┌───────────────────────────────┐
- │ T-Dongle-S3  │◄─────────────────────►│ Radxa Zero 3W                 │
+ │ T-Dongle-S3  │◄─────────────────────►│ Radxa Cubie A7Z                 │
  │ ESP32-S3     │  USB data over TCP    │                               │
  │              │                       │  WiFi AP (hostapd, hidden)    │
  │ USB Device ──┤                       │  BT 5.4 (bluez)              │
  │ WiFi STA     │                       │                               │
  │ BLE Control  │                       │  ┌─────────────────────────┐ │
  └──────┬───────┘                       │  │  Video Compositor       │ │
-     Car USB-A                          │  │  (RK3566 HW codecs)     │ │
+     Car USB-A                          │  │  (A733 HW codecs)     │ │
                                         │  │                         │ │
   Phone (Android or iPhone)             │  │  ┌─────┐ ┌───────────┐ │ │
       │                                 │  │  │AA/CP│ │ Baby Cam  │ │ │
@@ -109,11 +109,11 @@ Car touchscreen → AA touch → T-Dongle → TCP → Radxa
 
 ---
 
-## Phase 1: Radxa Zero 3W — OS & Base Setup
+## Phase 1: Radxa Cubie A7Z — OS & Base Setup
 
 ### 1.1 Flash Debian Image
-- Download official Radxa Zero 3W Debian CLI image (no desktop)
-  from https://docs.radxa.com/en/zero/zero3/download
+- Download official Radxa Cubie A7Z Debian CLI image (no desktop)
+  from https://github.com/radxa-build/radxa-a733/releases
 - Flash to microSD with `dd` or balenaEtcher
 - First boot, login via serial console (USB-C OTG port)
 - Run `rsetup` for initial configuration
@@ -162,7 +162,7 @@ Two BT profiles registered:
 ### 1.4 Enable IMX219 Camera
 ```bash
 sudo rsetup
-# Overlays → Manage overlays → Enable radxa-zero3-imx219
+# Overlays → Manage overlays → Enable Radxa Camera 4K
 # Reboot
 
 sudo apt install v4l-utils
@@ -176,20 +176,21 @@ sudo apt install gpiod
 gpioset gpiochip0 <pin>=1  # IR LEDs on via MOSFET
 ```
 
-### 1.6 Install Rockchip MPP + ffmpeg-rockchip
+### 1.6 Install Allwinner CedarVE + ffmpeg with V4L2 M2M
 Critical for hardware video encode/decode (split-screen compositing).
 ```bash
-sudo apt install librockchip-mpp-dev librockchip-mpp1 librga-dev librga2
+# CedarVE driver is included in the vendor kernel.
+# Build ffmpeg with V4L2 M2M hardware acceleration:
+sudo apt install libdrm-dev
 
-git clone https://github.com/nyanmisaka/ffmpeg-rockchip
-cd ffmpeg-rockchip
-./configure --enable-rkmpp --enable-rkrga --enable-version3 \
-  --enable-libdrm --enable-gpl
-make -j4 && sudo make install
+git clone https://github.com/FFmpeg/FFmpeg.git
+cd FFmpeg
+./configure --enable-v4l2-m2m --enable-libdrm --enable-gpl --enable-version3
+make -j8 && sudo make install
 
 # Verify:
-ffmpeg -decoders | grep rkmpp   # h264_rkmpp
-ffmpeg -encoders | grep rkmpp   # h264_rkmpp
+ffmpeg -decoders | grep v4l2m2m   # h264_v4l2m2m
+ffmpeg -encoders | grep v4l2m2m   # h264_v4l2m2m
 ```
 
 ---
@@ -282,9 +283,9 @@ To composite baby cam into the AA video stream:
 Phone ←TLS→ aa-proxy-rs (MITM) ←TLS→ Car HU (via T-Dongle)
                   │
                   ├── Channel 3 (Video): intercept H.264
-                  │     → Decode (h264_rkmpp hardware)
+                  │     → Decode (h264_v4l2m2m hardware)
                   │     → Composite with baby cam (RGA)
-                  │     → Re-encode (h264_rkmpp hardware)
+                  │     → Re-encode (h264_v4l2m2m hardware)
                   │     → Forward to car
                   │
                   ├── Channel 1 (Touch): remap coordinates
@@ -309,7 +310,7 @@ Video payload:
 Frames > 16KB are fragmented — must reassemble before decode.
 ```
 
-### 3.4 Hardware Video Pipeline (RK3566)
+### 3.4 Hardware Video Pipeline (A733)
 ```
 AA/CarPlay H.264 → RKVDEC2 (HW decode) → YUV frame ──┐
                                                         │
@@ -345,7 +346,7 @@ The only Apple-specific hardware is the MFi auth chip on I2C.
 ### 4.1 Architecture
 
 ```
-iPhone                              Radxa Zero 3W
+iPhone                              Radxa Cubie A7Z
   │                                    │
   │◄──── BT discovery ────────────────►│ bluez: CarPlay BT service
   │                                    │
@@ -614,7 +615,7 @@ Side cross-section:          Front view:
 ┌──────────────────┐         ┌──────────────────┐
 │ Camera + IR LEDs │ ~8mm    │ [IR] [CAM] [IR]  │
 ├──────────────────┤         │                  │
-│ Radxa Zero 3W   │ ~6mm    │                  │
+│ Radxa Cubie A7Z   │ ~6mm    │                  │
 ├──────────────────┤         │                  │
 │ MFi breakout PCB│ ~3mm    │                  │
 ├──────────────────┤         │                  │
@@ -626,7 +627,7 @@ Side cross-section:          Front view:
 Stack (bottom to top):
 1. GoPro 2-prong mount fingers (3mm wide, 3mm gap, 5mm hole)
 2. MFi breakout board (tiny, ~15x10mm)
-3. Radxa Zero 3W (65x30mm)
+3. Radxa Cubie A7Z (65x30mm)
 4. IMX219 camera (24x25mm center) + IR LEDs (flanking)
 
 Access ports (sides): USB-C power, microSD slot.
@@ -762,7 +763,7 @@ espwirelesscar/
 | Risk | Mitigation |
 |---|---|
 | aa-proxy-rs MITM certs hard to obtain | Extract galroot_cert from AA app; fallback to phone-based split |
-| RK3566 HW encode buggy (mpph264enc) | Use ffmpeg-rockchip h264_rkmpp; fallback to H.265 transcode |
+| A733 CedarVE encode issues | Use ffmpeg V4L2 M2M h264_v4l2m2m; fallback to software encode |
 | MFi chip I2C register map varies by chip version | Test with multiple salvaged chips; community I2C dumps exist |
 | iAP2 protocol gaps in documentation | Reference libimobiledevice, wiomoc.de research, packet captures |
 | FairPlay handshake changes in new iOS | Pin supported iOS versions; RPiPlay community tracks changes |

@@ -2,7 +2,7 @@
 """
 AADongle OTA Update Server
 
-Runs on the Radxa Zero 3W. Serves firmware updates for:
+Runs on the Radxa Cubie A7Z. Serves firmware updates for:
   - Radxa (self-update): system packages, compositor, services
   - T-Dongle-S3: ESP32 firmware binary via HTTP
 

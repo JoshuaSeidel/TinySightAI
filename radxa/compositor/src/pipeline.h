@@ -4,17 +4,25 @@
 #include <stddef.h>
 
 /*
- * Hardware video pipeline using RK3566 MPP (Media Process Platform).
+ * Hardware video pipeline using Allwinner A733 CedarVE (Video Engine).
  *
  * Flow:
- *   Input H.264/H.265 (from AA/CarPlay) → RKVDEC2 decode → YUV frame
+ *   Input H.264/H.265 (from AA/CarPlay) → CedarVE decode → YUV frame
  *   Camera NV12 → (already YUV)
- *   Both YUV frames → RGA composite → single YUV frame
- *   Composited YUV → Hantro H1 encode → Output H.264
+ *   Both YUV frames → G2D composite → single YUV frame
+ *   Composited YUV → CedarVE encode → Output H.264
  *
- * Decode: H.264 AND H.265 supported (RKVDEC2 handles both)
- * Encode: H.264 ONLY (Hantro H1 has no H.265 encode)
+ * Decode: H.264 AND H.265 supported (CedarVE, up to 8K@24fps)
+ * Encode: H.264 ONLY (CedarVE, up to 4K@30fps)
  * Output to car is always H.264 — Android Auto protocol requires it.
+ *
+ * Implementation options:
+ *   1. V4L2 M2M API (stateless decode, stateful encode) — most portable
+ *   2. FFmpeg with cedrus/v4l2 hw accel — easiest integration
+ *   3. libcedarc (Allwinner proprietary) — best performance, vendor-only
+ *
+ * G2D (2D engine): scaling, blitting, alpha blending, rotation.
+ * Alternative: PowerVR GPU (OpenGL ES 3.2) for compositing.
  *
  * All operations are hardware-accelerated. Target: <20ms at 720p 30fps.
  */
@@ -34,14 +42,14 @@ typedef enum {
 
 /**
  * Initialize the hardware video pipeline.
- * Sets up MPP decoder(s), RGA compositor, and MPP encoder.
+ * Sets up CedarVE decoder(s), G2D compositor, and CedarVE encoder.
  * Output is always 1280x720 H.264 (car protocol requirement).
  */
 pipeline_t *pipeline_init(int output_w, int output_h, int fps);
 
 /**
  * Decode a video frame from the phone (AA or CarPlay).
- * Accepts both H.264 and H.265 input — RKVDEC2 handles both.
+ * Accepts both H.264 and H.265 input — CedarVE handles both.
  * Returns 0 on success. Decoded YUV is stored internally.
  */
 int pipeline_decode(pipeline_t *p, const uint8_t *data, size_t len,

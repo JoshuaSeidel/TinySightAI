@@ -5,7 +5,7 @@
 # directly from camera frames and toggles GPIO in-process. This script
 # is kept as a standalone fallback for testing or use without the compositor.
 #
-# Controls 850nm IR LEDs wired to a Radxa Zero 3W GPIO pin.
+# Controls 850nm IR LEDs wired to a Radxa Cubie A7Z GPIO pin.
 # Four operating modes:
 #
 #   auto  — check camera brightness every 30 s, enable IR if dark
@@ -21,8 +21,8 @@
 # GPIO:
 #   Write 1 to GPIO sysfs to turn IR LEDs on, 0 to turn off.
 #   Pin number: set IR_GPIO_NUM or edit IR_GPIO_NUM below.
-#   For Radxa Zero 3W GPIO header layout see:
-#     https://docs.radxa.com/en/zero/zero3/hardware-design/hardware-interface
+#   For Radxa Cubie A7Z GPIO header layout see:
+#     https://docs.radxa.com/en/cubie/a7z/hardware-use/pin-gpio
 #
 # Usage:
 #   sudo ./ir-led-control.sh
@@ -34,9 +34,10 @@ set -euo pipefail
 # Configuration (override via environment or edit here)
 # ---------------------------------------------------------------------------
 
-# GPIO pin number — GPIO3_D4 = physical pin 7 on Radxa Zero 3W 40-pin header
-# GPIO3_D4 = (3*32) + (3*8) + 4 = 96 + 24 + 4 = 124
-IR_GPIO_NUM="${IR_GPIO_NUM:-124}"
+# GPIO pin number — Radxa Cubie A7Z (Allwinner A733) 40-pin header
+# Allwinner GPIO formula: P{letter}{num} = num + 32 * letter_index
+# PB7 = 7 + 32*1 = 39 (TODO: verify correct pin on actual hardware)
+IR_GPIO_NUM="${IR_GPIO_NUM:-39}"
 
 IR_GPIO_BASE="/sys/class/gpio"
 IR_GPIO_DIR="${IR_GPIO_BASE}/gpio${IR_GPIO_NUM}"

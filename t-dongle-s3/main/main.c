@@ -17,8 +17,8 @@ static const char *TAG = "main";
  * T-Dongle-S3 Firmware — USB-to-WiFi Bridge for Wireless AA/CarPlay
  *
  * Data flow:
- *   Car USB-A → T-Dongle (USB device) → WiFi → Radxa Zero 3W → Phone
- *   Car USB-A ← T-Dongle (USB device) ← WiFi ← Radxa Zero 3W ← Phone
+ *   Car USB-A → T-Dongle (USB device) → WiFi → Radxa Cubie A7Z → Phone
+ *   Car USB-A ← T-Dongle (USB device) ← WiFi ← Radxa Cubie A7Z ← Phone
  *
  * The T-Dongle is a transparent pipe. It doesn't understand the AA/CarPlay
  * protocol — it just shuttles bytes between USB and TCP.

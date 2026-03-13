@@ -4,9 +4,9 @@
 
 | Question | Answer |
 |---|---|
-| IMX708 camera? | Great sensor, but **does NOT work on Radxa Zero 3W** — driver/ISP broken on RK3566 |
+| IMX708 camera? | Great sensor, but **does NOT work on Radxa Cubie A7Z** — driver/ISP broken on A733 |
 | Orange Pi Zero 2W? | **No CSI port, broken HW video codecs on Linux** — disqualified |
-| Better board in this size? | **No.** Radxa Zero 3W is the only 65x30mm board that meets all requirements |
+| Better board in this size? | **No.** Radxa Cubie A7Z is the only 65x30mm board that meets all requirements |
 | Best camera for this build? | **Arducam IMX219 NoIR Wide Angle** (8MP, 3.4x zoom at 720p) — confirmed working |
 
 ---
@@ -25,18 +25,18 @@
 | NoIR variant | Yes (RPi Camera Module 3 Wide NoIR) | Yes (Arducam IMX219 NoIR) |
 | Price | $30-45 | $15-25 |
 
-### The problem: NOT compatible with Radxa Zero 3W
+### The problem: NOT compatible with Radxa Cubie A7Z
 
-The Radxa Zero 3W (RK3566) only supports **two camera sensors**:
+The Radxa Cubie A7Z (A733) only supports **two camera sensors**:
 - **IMX219** (RPi Camera v2 / Arducam variants)
 - **OV5647** (RPi Camera v1.3)
 
 The IMX708 requires:
-1. A kernel driver (exists but broken on RK3566)
+1. A kernel driver (exists but broken on A733)
 2. ISP tuning/IQ files specific to the sensor (don't exist for rockchip rkaiq)
 3. Autofocus motor control via libcamera (not supported outside RPi ecosystem)
 
-Community attempts to port IMX708 to RK3566 result in:
+Community attempts to port IMX708 to A733 result in:
 - rkaiq ISP engine crashes with segfaults during initialization
 - 3A (autofocus, auto-exposure, auto-white-balance) completely non-functional
 - Raw data streams but images are unusable
@@ -50,11 +50,11 @@ Community attempts to port IMX708 to RK3566 result in:
 | RPi Zero 2W | Yes | **No (2.4 GHz only)** | Partial (VideoCore IV) | Yes | 65x30mm |
 | RPi 4B | Yes | Yes | Limited encode | Yes | **85x56mm (too big)** |
 | RPi 5 | Yes | Yes | **No HW encode** | Yes | **85x56mm (too big)** |
-| Radxa Zero 3W | Yes | Yes | **Full HW encode+decode** | Yes | 65x30mm |
+| Radxa Cubie A7Z | Yes | Yes | **Full HW encode+decode** | Yes | 65x30mm |
 
 The RPi Zero 2W lacks 5 GHz WiFi (required for CarPlay). The RPi 4/5 are too large
-and lack the RK3566's excellent hardware H.264 encode pipeline needed for real-time
-compositing. The Radxa Zero 3W is the right board.
+and lack the A733's excellent hardware H.264 encode pipeline needed for real-time
+compositing. The Radxa Cubie A7Z is the right board.
 
 ---
 
@@ -68,7 +68,7 @@ compositing. The Radxa Zero 3W is the right board.
 | RAM | 1/1.5/2/4 GB LPDDR4 |
 | WiFi | 802.11ac dual-band (2.4 + 5 GHz) |
 | Bluetooth | 5.0 |
-| Size | 65x30mm (same as Radxa Zero 3W) |
+| Size | 65x30mm (same as Radxa Cubie A7Z) |
 | Price | ~$20-35 |
 | **CSI Camera** | **NO — confirmed absent** |
 | **HW Video (Linux)** | **BROKEN — H618 cedrus VPU not working** |
@@ -97,8 +97,8 @@ this board cannot do what we need.
 
 | Board | SoC | CSI | 5 GHz WiFi | BT 5+ | HW H.264 Encode | USB OTG | RAM | Verdict |
 |---|---|---|---|---|---|---|---|---|
-| **Radxa Zero 3W** | RK3566 | YES | YES (WiFi 6) | 5.4 | YES (h264_rkmpp) | YES | 1-8 GB | **THE ONE** |
-| Radxa Zero 3E | RK3566 | YES | NO (Ethernet only) | NO | YES | YES | 1-8 GB | No WiFi |
+| **Radxa Cubie A7Z** | A733 | YES | YES (WiFi 6) | 5.4 | YES (CedarVE) | YES | 1-16 GB | **THE ONE** |
+| Radxa Zero 3E | A733 | YES | NO (Ethernet only) | NO | YES | YES | 1-8 GB | No WiFi |
 | Radxa Zero (orig) | S905Y2 | NO | YES (WiFi 5) | 5.0 | Partial | YES | 0.5-4 GB | No CSI |
 | Orange Pi Zero 2W | H618 | NO | YES (WiFi 5) | 5.0 | BROKEN | Partial | 1-4 GB | No CSI, no VPU |
 | Banana Pi M2 Zero | H3 | YES | NO (2.4 GHz) | YES | Partial | YES | 512 MB | No 5 GHz, low RAM |
@@ -106,7 +106,7 @@ this board cannot do what we need.
 | Radxa Cubie A7Z | A733 | YES | YES (WiFi 6) | 5.4 | HW present, **driver WIP** | YES | 1-16 GB | Future (2027?) |
 | LuckFox Pico Ultra W | RV1106 | YES | NO (2.4 GHz) | 5.2 | ISP only | NO | 256 MB | Too small/limited |
 
-**The Radxa Zero 3W is the only board that checks every box.**
+**The Radxa Cubie A7Z is the only board that checks every box.**
 
 The Radxa Cubie A7Z (Allwinner A733) is worth watching — same form factor, WiFi 6,
 BT 5.4, CSI, up to 16 GB RAM — but its VPU driver doesn't exist yet.
@@ -115,7 +115,7 @@ BT 5.4, CSI, up to 16 GB RAM — but its VPU driver doesn't exist yet.
 
 ## Camera: Best Option for This Build
 
-Since we're locked to the Radxa Zero 3W (RK3566), and RK3566 only supports IMX219
+Since we're locked to the Radxa Cubie A7Z (A733), and A733 only supports IMX219
 and OV5647, the best camera is:
 
 ### Arducam IMX219 NoIR Wide Angle — 120° FOV
@@ -129,9 +129,9 @@ and OV5647, the best camera is:
 | Digital zoom at 1080p | ~2.3x with no quality loss |
 | Autofocus | No (fixed focus, infinity to ~20cm) |
 | Board size | 24x25mm |
-| Interface | CSI (22-pin, matches Radxa Zero 3W) |
-| Price | ~$15-20 |
-| Radxa Zero 3W compatible | Confirmed working (overlay: radxa-zero3-imx219) |
+| Interface | CSI (31-pin, matches Radxa Cubie A7Z) |
+| Price | ~$30-40 |
+| Radxa Cubie A7Z compatible | Confirmed working (overlay: Radxa Camera 4K via rsetup) |
 
 ### Zoom breakdown
 
@@ -149,9 +149,9 @@ that's tight enough to see a baby's face clearly from a headrest mount at ~2 fee
 
 The Arducam IMX519 (16MP, PDAF autofocus) is a better sensor on paper, but it's NOT
 listed in Radxa's supported camera list. It requires a separate libcamera driver that
-hasn't been ported to the RK3566 ISP. Same problem as the IMX708.
+hasn't been ported to the A733 ISP. Same problem as the IMX708.
 
-On RK3566: **IMX219 is the best camera you can use.** Period.
+On A733: **IMX219 is the best camera you can use.** Period.
 
 ### Making the most of IMX219
 
@@ -160,7 +160,7 @@ The IMX219 NoIR + IR LEDs at 120° wide angle is genuinely excellent for a baby 
 - 8MP provides clean 3.4x digital zoom
 - NoIR + IR LEDs = clear night vision without visible light
 - Fixed focus is actually fine — backseat is always 1.5-3 feet away
-- The V4L2 crop → RGA scale pipeline on RK3566 handles zoom in hardware, zero CPU
+- The V4L2 crop → RGA scale pipeline on A733 handles zoom in hardware, zero CPU
 
 ---
 
@@ -171,8 +171,8 @@ the current component selection is optimal:
 
 | Component | Model | Why |
 |---|---|---|
-| Brain | **Radxa Zero 3W 1GB** | Only 65x30mm SBC with CSI + 5GHz WiFi + HW codecs + USB OTG |
-| Camera | **Arducam IMX219 NoIR Wide Angle** | Only high-res camera confirmed working on RK3566 |
+| Brain | **Radxa Cubie A7Z 1GB** | Only 65x30mm SBC with CSI + 5GHz WiFi + HW codecs + USB OTG |
+| Camera | **Arducam IMX219 NoIR Wide Angle** | Only high-res camera confirmed working on A733 |
 | USB Dongle | **LilyGO T-Dongle-S3** | ESP32-S3, USB-A plug form factor |
 | MFi Chip | **Apple MFi coprocessor (salvaged)** | Required for CarPlay auth |
 | IR LEDs | **850nm modules** | Night vision illumination |
@@ -180,7 +180,7 @@ the current component selection is optimal:
 
 ### What about upgrading to more RAM?
 
-The Radxa Zero 3W comes in 1/2/4/8 GB variants. For this project:
+The Radxa Cubie A7Z comes in 1/2/4/8 GB variants. For this project:
 - **1 GB is sufficient** — trimmed Debian (~200 MB), compositor uses zero-copy DMA buffers
 - **2 GB gives comfort margin** — recommended if the price delta is small (~$5 more)
 - **4+ GB is overkill** — nothing in this pipeline needs it

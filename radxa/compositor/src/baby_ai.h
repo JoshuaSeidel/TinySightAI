@@ -1,10 +1,10 @@
 #pragma once
 /*
- * baby_ai.h — AI Baby Monitoring via RK3566 NPU
+ * baby_ai.h — AI Baby Monitoring via Allwinner A733 NPU
  *
  * Runs lightweight neural network inference on camera frames using the
- * Rockchip RKNN NPU (0.8-1.0 TOPS on RK3566). Detections run at ~1 fps
- * in a dedicated thread, leaving the video pipeline undisturbed.
+ * VeriSilicon VIP9000 NPU (3 TOPS @ INT8 on Allwinner A733). Detections
+ * run at ~1 fps in a dedicated thread, leaving the video pipeline undisturbed.
  *
  * Detections:
  *   - Baby present / not present (object detection)
@@ -12,9 +12,11 @@
  *   - Face covered / obstructed
  *   - Excessive motion / distress (frame differencing)
  *
- * Model: YOLOv8n INT8 RKNN (~6MB, ~50ms inference on RK3566 NPU)
- *   Converted via: rknn-toolkit2 from Ultralytics YOLOv8n export
- *   Expected at: /opt/aadongle/models/baby_detect.rknn
+ * Model: YOLOv8n INT8 NBG (~6MB, ~20ms inference on VIP9000 NPU)
+ *   Converted via: VeriSilicon Acuity Toolkit (on x86 host)
+ *     1. Export YOLOv8n to ONNX: yolo export model=yolov8n.pt format=onnx
+ *     2. Convert ONNX → NBG: acuitylite quantize + export (INT8 asymmetric)
+ *   Expected at: /opt/aadongle/models/baby_detect.nb
  *
  * Alert flow:
  *   baby_ai_process() → updates baby_ai_status_t
@@ -49,9 +51,9 @@ typedef struct {
 
 /**
  * Initialize the AI module.
- * Loads the RKNN model file and prepares the NPU context.
+ * Loads the NBG model file and prepares the VIPLite NPU context.
  *
- * model_path: path to .rknn model file (NULL = default path)
+ * model_path: path to .nb model file (NULL = default path)
  * Returns 0 on success, -1 on failure (non-fatal — AI features disabled).
  */
 int baby_ai_init(const char *model_path);
@@ -79,7 +81,7 @@ baby_ai_status_t baby_ai_get_status(void);
 
 /**
  * Enable or disable AI processing.
- * When disabled, the inference thread sleeps and no GPU/NPU resources are used.
+ * When disabled, the inference thread sleeps and no NPU resources are used.
  */
 void baby_ai_set_enabled(bool enabled);
 

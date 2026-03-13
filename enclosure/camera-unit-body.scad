@@ -2,7 +2,7 @@
  * AADongle Camera Unit — Body
  *
  * Pill-shaped (rounded on ALL edges). Holds everything:
- *   - Radxa Zero 3W on edge rails (press-fit)
+ *   - Radxa Cubie A7Z on edge rails (press-fit)
  *   - MFi QFN20 breakout in slide-in slot with clips
  *   - Camera PCB on M2 standoffs, lens extends up through lid
  *
@@ -13,7 +13,7 @@
  *  DIMENSIONS
  * ============================================================ */
 
-// Radxa Zero 3W
+// Radxa Cubie A7Z
 radxa_w      = 65;
 radxa_d      = 30;
 radxa_pcb_h  = 1.2;

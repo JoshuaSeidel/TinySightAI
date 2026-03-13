@@ -2,7 +2,7 @@ CC      = gcc
 CFLAGS  = -O2 -Wall -Wextra -pthread -I. -Imfi -Iiap2 -Iairplay \
           $(shell pkg-config --cflags libavcodec libavutil 2>/dev/null)
 
-# Build-time dependencies on Debian (Radxa Zero 3W):
+# Build-time dependencies on Debian (Radxa Cubie A7Z):
 #   sudo apt install libssl-dev libavahi-client-dev libavahi-common-dev \
 #                    libasound2-dev libavcodec-dev libavutil-dev \
 #                    libbluetooth-dev libdbus-1-dev

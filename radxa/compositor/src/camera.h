@@ -5,13 +5,13 @@
 #include <stdbool.h>
 
 /*
- * V4L2 camera capture for IMX219 NoIR on Radxa Zero 3W.
+ * V4L2 camera capture for Radxa Camera 4K (IMX415) on Radxa Cubie A7Z.
  * Outputs NV12 frames via V4L2 crop + capture.
  * Digital zoom is implemented via V4L2 selection API (crop region).
  */
 
-#define CAM_SENSOR_W     3280
-#define CAM_SENSOR_H     2464
+#define CAM_SENSOR_W     3840
+#define CAM_SENSOR_H     2160
 #define CAM_OUTPUT_W     1280
 #define CAM_OUTPUT_H     720
 #define CAM_FPS          30

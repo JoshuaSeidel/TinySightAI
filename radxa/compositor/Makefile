@@ -3,17 +3,20 @@ CC = gcc
 # -D_GNU_SOURCE exposes sendmsg/recvmsg and POSIX extensions (needed by aa_video_output.c)
 # -std=c99 enforces C99 compliance across all source files
 CFLAGS  = -std=c99 -O2 -Wall -Wextra -pthread -D_GNU_SOURCE
-CFLAGS += -I/usr/include/rockchip
-CFLAGS += -I/usr/include/rga
 CFLAGS += -I/usr/include/libdrm
 
-# RKNN SDK: enable if librknnrt is installed, otherwise stub out baby_ai
-# Note: rknn_api.h may exist without librknnrt.so (header-only dev package)
-ifneq ($(wildcard /usr/lib/librknnrt.so /usr/lib/aarch64-linux-gnu/librknnrt.so),)
-LDFLAGS = -lrockchip_mpp -lrga -ldrm -lpthread -lm -lrknnrt
+# Allwinner A733 (Cubie A7Z): CedarVE for H.264 encode/decode, G2D for 2D compositing
+# TODO: Add Allwinner VPU/G2D include paths once vendor SDK is available on the board
+# Candidate includes: /usr/include/cedarc, /usr/include/g2d
+# For now, pipeline.c should use V4L2 M2M API or ffmpeg with hw accel
+
+# NPU: check for VeriSilicon VIPLite runtime (VIP9000 on Allwinner A733)
+ifneq ($(wildcard /usr/lib/libVIPlite.so /usr/lib/aarch64-linux-gnu/libVIPlite.so),)
+CFLAGS += -I/usr/include/VIPLite
+LDFLAGS = -ldrm -lpthread -lm -lVIPlite -lVIPuser
 else
 CFLAGS += -DBABY_AI_STUB
-LDFLAGS = -lrockchip_mpp -lrga -ldrm -lpthread -lm
+LDFLAGS = -ldrm -lpthread -lm
 endif
 
 SRC_DIR = src
