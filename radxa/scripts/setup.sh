@@ -77,7 +77,7 @@ apt-get install -y \
     `# Core system tools` \
     build-essential git curl wget \
     `# Networking / WiFi AP` \
-    hostapd dnsmasq-base \
+    hostapd dnsmasq \
     `# Bluetooth` \
     bluez \
     `# Camera / V4L2` \
