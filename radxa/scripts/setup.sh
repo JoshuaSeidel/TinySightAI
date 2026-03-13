@@ -235,6 +235,7 @@ fi
 
 # dnsmasq — configure but do NOT start (binds to ap0 which doesn't exist yet)
 if [ -f "$CONFIG_DIR/dnsmasq.conf" ]; then
+    mkdir -p /etc/dnsmasq.d
     install -m 644 "$CONFIG_DIR/dnsmasq.conf" /etc/dnsmasq.d/aadongle.conf
     # Drop-in: dnsmasq must wait for ap0 interface to exist
     mkdir -p /etc/systemd/system/dnsmasq.service.d
