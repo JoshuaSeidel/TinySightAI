@@ -531,13 +531,11 @@ chroot "$NEWROOT" bash -c "
     systemctl set-default multi-user.target
 "
 
-# Mask unnecessary services
+# Mask unnecessary services (keep emergency/rescue for boot debugging!)
 chroot "$NEWROOT" bash -c "
     systemctl mask apt-daily.timer 2>/dev/null || true
     systemctl mask apt-daily-upgrade.timer 2>/dev/null || true
     systemctl mask systemd-journal-flush.service 2>/dev/null || true
-    systemctl mask emergency.service 2>/dev/null || true
-    systemctl mask rescue.service 2>/dev/null || true
     systemctl mask swap.target 2>/dev/null || true
 "
 
@@ -555,7 +553,9 @@ ok "Services installed and enabled"
 # ---------------------------------------------------------------------------
 step "[8/9] Setting up read-only root with overlayfs..."
 
-# Install initramfs overlay scripts
+# Install initramfs overlay scripts into new rootfs
+# NOTE: The initramfs must be rebuilt AFTER deploy (on the live system),
+# since /boot is excluded from rsync and the chroot lacks the kernel image.
 mkdir -p "$NEWROOT/etc/initramfs-tools/scripts/init-bottom"
 mkdir -p "$NEWROOT/etc/initramfs-tools/hooks"
 
@@ -567,27 +567,28 @@ cp "$CONFIG_DIR/overlayfs/overlay-hook" \
    "$NEWROOT/etc/initramfs-tools/hooks/overlay-root"
 chmod 755 "$NEWROOT/etc/initramfs-tools/hooks/overlay-root"
 
-# Rebuild initramfs inside chroot
-chroot "$NEWROOT" update-initramfs -u -k "$KERNEL_VER" 2>/dev/null || \
-    warn "Could not rebuild initramfs in chroot — will need rebuild on first boot"
+# DO NOT rebuild initramfs here — it won't work in the chroot because:
+#   1. /boot is excluded from rsync (the chroot's /boot is empty)
+#   2. The vendor kernel image is not installed via apt (no triggers)
+# Instead, rebuild on first boot via a oneshot service.
+cat > "$NEWROOT/etc/systemd/system/initramfs-rebuild.service" <<'INITRD_EOF'
+[Unit]
+Description=Rebuild initramfs with overlay scripts (first boot only)
+ConditionPathExists=!/var/lib/initramfs-rebuilt
+After=local-fs.target
 
-# Kernel cmdline (update /boot/uEnv.txt on host — boot partition shared)
-UENV="/boot/uEnv.txt"
-if [ -f "$UENV" ]; then
-    EXTRA="quiet loglevel=0 fsck.mode=skip systemd.show_status=false"
-    if grep -q "^extraargs=" "$UENV"; then
-        current=$(grep "^extraargs=" "$UENV" | cut -d= -f2-)
-        for arg in $EXTRA; do
-            echo "$current" | grep -q "$arg" || current="$current $arg"
-        done
-        sed -i "s|^extraargs=.*|extraargs=$current|" "$UENV"
-    else
-        echo "extraargs=$EXTRA" >> "$UENV"
-    fi
-    ok "Kernel cmdline updated"
-fi
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/update-initramfs -u
+ExecStartPost=/bin/touch /var/lib/initramfs-rebuilt
+ExecStartPost=/bin/echo "initramfs rebuilt with overlay — reboot to activate read-only root"
 
-ok "Read-only root configured"
+[Install]
+WantedBy=multi-user.target
+INITRD_EOF
+chroot "$NEWROOT" systemctl enable initramfs-rebuild 2>/dev/null || true
+
+ok "Overlay scripts installed (initramfs will rebuild on first boot)"
 
 # ---------------------------------------------------------------------------
 # Step 9: Deploy minimal rootfs
@@ -633,6 +634,7 @@ cleanup_mounts
     --exclude=/proc \
     --exclude=/sys \
     --exclude=/dev \
+    --exclude=/run \
     --exclude=/mnt \
     --exclude=/boot \
     --exclude=/data \
@@ -643,7 +645,7 @@ cleanup_mounts
     --exclude=/root/.rustup \
     2>&1
 if [ $? -ne 0 ]; then
-    err "rsync failed — new rootfs was NOT deployed"
+    fail "rsync failed — new rootfs was NOT deployed"
     exit 1
 fi
 
