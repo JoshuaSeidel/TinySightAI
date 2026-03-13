@@ -626,7 +626,7 @@ cleanup_mounts
 
 # rsync the new rootfs over the live system
 # Exclude: virtual filesystems, build area, boot partition, build tools, swap
-rsync -aAX --delete "$NEWROOT/" / \
+"$NEWROOT/usr/bin/rsync" -aAX --delete "$NEWROOT/" / \
     --exclude=/proc \
     --exclude=/sys \
     --exclude=/dev \
@@ -638,7 +638,11 @@ rsync -aAX --delete "$NEWROOT/" / \
     --exclude=/home/radxa/TinySightAI \
     --exclude=/root/.cargo \
     --exclude=/root/.rustup \
-    2>&1 || true
+    2>&1
+if [ $? -ne 0 ]; then
+    err "rsync failed — new rootfs was NOT deployed"
+    exit 1
+fi
 
 ok "rsync complete"
 
