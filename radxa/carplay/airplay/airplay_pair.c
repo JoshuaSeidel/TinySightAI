@@ -229,33 +229,43 @@ static void srp_compute_verifier(const uint8_t salt[16],
 }
 
 /* -----------------------------------------------------------------------
- * HKDF helper (RFC 5869, using OpenSSL EVP_KDF)
+ * HKDF helper (RFC 5869, using OpenSSL EVP_PKEY_HKDF — works on 1.1+)
  * ----------------------------------------------------------------------- */
 static int hkdf_sha512(const uint8_t *salt, size_t salt_len,
                         const uint8_t *ikm,  size_t ikm_len,
                         const uint8_t *info, size_t info_len,
                         uint8_t *out, size_t out_len)
 {
-    EVP_KDF *kdf = EVP_KDF_fetch(NULL, "HKDF", NULL);
-    if (!kdf) return -1;
+    EVP_PKEY_CTX *pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, NULL);
+    if (!pctx) return -1;
 
-    EVP_KDF_CTX *kctx = EVP_KDF_CTX_new(kdf);
-    EVP_KDF_free(kdf);
-    if (!kctx) return -1;
+    if (EVP_PKEY_derive_init(pctx) <= 0 ||
+        EVP_PKEY_CTX_set_hkdf_md(pctx, EVP_sha512()) <= 0 ||
+        EVP_PKEY_CTX_set1_hkdf_key(pctx, ikm, (int)ikm_len) <= 0) {
+        EVP_PKEY_CTX_free(pctx);
+        return -1;
+    }
 
-    OSSL_PARAM params[6];
-    int p = 0;
-    params[p++] = OSSL_PARAM_construct_utf8_string("digest", "SHA512", 0);
-    params[p++] = OSSL_PARAM_construct_octet_string("key", (void *)ikm, ikm_len);
-    if (salt && salt_len > 0)
-        params[p++] = OSSL_PARAM_construct_octet_string("salt", (void *)salt, salt_len);
-    if (info && info_len > 0)
-        params[p++] = OSSL_PARAM_construct_octet_string("info", (void *)info, info_len);
-    params[p] = OSSL_PARAM_construct_end();
+    if (salt && salt_len > 0) {
+        if (EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt, (int)salt_len) <= 0) {
+            EVP_PKEY_CTX_free(pctx);
+            return -1;
+        }
+    }
+    if (info && info_len > 0) {
+        if (EVP_PKEY_CTX_add1_hkdf_info(pctx, info, (int)info_len) <= 0) {
+            EVP_PKEY_CTX_free(pctx);
+            return -1;
+        }
+    }
 
-    int rc = EVP_KDF_derive(kctx, out, out_len, params);
-    EVP_KDF_CTX_free(kctx);
-    return (rc == 1) ? 0 : -1;
+    if (EVP_PKEY_derive(pctx, out, &out_len) <= 0) {
+        EVP_PKEY_CTX_free(pctx);
+        return -1;
+    }
+
+    EVP_PKEY_CTX_free(pctx);
+    return 0;
 }
 
 /* -----------------------------------------------------------------------

@@ -210,11 +210,11 @@ step "  Installing version-dependent shared libraries..."
 case "$DEBIAN_SUITE" in
     bullseye)
         chroot "$NEWROOT" apt-get install -y --no-install-recommends \
-            libssl1.1 libavcodec58 libavutil56 2>&1 | tail -3
+            libssl1.1 libavcodec58 libavutil56 libswscale5 2>&1 | tail -3
         ;;
     bookworm|*)
         chroot "$NEWROOT" apt-get install -y --no-install-recommends \
-            libssl3 libavcodec59 libavutil57 2>&1 | tail -3
+            libssl3 libavcodec59 libavutil57 libswscale6 2>&1 | tail -3
         ;;
 esac
 ok "Version-dependent libraries installed"

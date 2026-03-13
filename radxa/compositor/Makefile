@@ -5,18 +5,18 @@ CC = gcc
 CFLAGS  = -std=c99 -O2 -Wall -Wextra -pthread -D_GNU_SOURCE
 CFLAGS += -I/usr/include/libdrm
 
-# Allwinner A733 (Cubie A7Z): CedarVE for H.264 encode/decode, G2D for 2D compositing
-# TODO: Add Allwinner VPU/G2D include paths once vendor SDK is available on the board
-# Candidate includes: /usr/include/cedarc, /usr/include/g2d
-# For now, pipeline.c should use V4L2 M2M API or ffmpeg with hw accel
+# FFmpeg (libavcodec for H.264/H.265 decode + H.264 encode, libswscale for scaling)
+FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavutil libswscale 2>/dev/null)
+FFMPEG_LIBS   := $(shell pkg-config --libs libavcodec libavutil libswscale 2>/dev/null)
+CFLAGS += $(FFMPEG_CFLAGS)
 
 # NPU: check for VeriSilicon VIPLite runtime (VIP9000 on Allwinner A733)
 ifneq ($(wildcard /usr/lib/libVIPlite.so /usr/lib/aarch64-linux-gnu/libVIPlite.so),)
 CFLAGS += -I/usr/include/VIPLite
-LDFLAGS = -ldrm -lpthread -lm -lVIPlite -lVIPuser
+LDFLAGS = -ldrm -lpthread -lm -lVIPlite -lVIPuser $(FFMPEG_LIBS)
 else
 CFLAGS += -DBABY_AI_STUB
-LDFLAGS = -ldrm -lpthread -lm
+LDFLAGS = -ldrm -lpthread -lm $(FFMPEG_LIBS)
 endif
 
 SRC_DIR = src

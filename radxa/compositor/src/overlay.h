@@ -1,8 +1,8 @@
 /*
- * overlay.h — RGA-based on-screen controls overlay
+ * overlay.h — Software on-screen controls overlay
  *
- * Pre-renders small icon bitmaps into NV12 buffers at init time and
- * composites them onto the output frame using RGA SRC-over alpha blending.
+ * Pre-renders small icon bitmaps into RGBA buffers at init time and
+ * composites them onto the NV12 output frame via software alpha blending.
  *
  * Icons rendered programmatically (no image file dependency):
  *
@@ -17,15 +17,12 @@
  * encoded H.264 is sent to the car.
  *
  * Pixel format: NV12 (YUV 4:2:0 semi-planar) — matches the compositor
- * pipeline composite buffer.  Alpha for the background rectangle is
- * emulated by blending manually into the YUV frame because standard
- * RGA SRC-OVER expects an RGBA source; we apply the background in
- * software and the foreground (white) via RGA blit.
+ * pipeline composite buffer.
  */
 #pragma once
 
 #include "pipeline.h"   /* layout_mode_t */
-#include <rga/im2d.h>   /* rga_buffer_t */
+#include <stdint.h>
 
 /* Icon pixel dimensions */
 #define OVERLAY_ICON_W  48

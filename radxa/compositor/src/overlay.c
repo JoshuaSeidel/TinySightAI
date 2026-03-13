@@ -1,14 +1,13 @@
 /*
- * overlay.c — RGA-based on-screen controls overlay
+ * overlay.c — Software on-screen controls overlay
  *
  * Icon rendering pipeline:
  *
  *   1. Pre-render each icon into a 48×48 RGBA buffer (software, once at init).
  *   2. At render time, for each icon:
  *      a. Draw a semi-transparent dark rectangle into the NV12 frame
- *         (software blend into Y/UV planes — RGA SRC-OVER needs RGBA source,
- *          but our frame is NV12, so we blend the background by hand).
- *      b. Blit the white icon foreground (RGBA→NV12) via RGA imblend().
+ *         (software blend into Y/UV planes).
+ *      b. Blit the white icon foreground (RGBA→NV12) via software blend.
  *
  * Touch hit-zones match touch.h (BTN_MODE_*, BTN_ZOOM_*) — the overlay
  * icons are drawn at the same pixel coordinates.

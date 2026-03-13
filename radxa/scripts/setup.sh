@@ -98,7 +98,7 @@ apt-get install -y \
     libbluetooth-dev \
     libdbus-1-dev \
     libasound2-dev \
-    libavcodec-dev libavutil-dev \
+    libavcodec-dev libavutil-dev libswscale-dev libx264-dev \
     `# avahi daemon (CarPlay mDNS)` \
     avahi-daemon \
     `# ustreamer build deps` \

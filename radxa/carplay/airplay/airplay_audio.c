@@ -222,8 +222,9 @@ static int decoder_init(airplay_audio_ctx_t *ctx)
     if (!avctx) return -1;
 
     /* Common CarPlay audio parameters */
-    avctx->sample_rate = AUDIO_SAMPLE_RATE;
-    av_channel_layout_default(&avctx->ch_layout, AUDIO_CHANNELS);
+    avctx->sample_rate    = AUDIO_SAMPLE_RATE;
+    avctx->channels       = AUDIO_CHANNELS;
+    avctx->channel_layout = av_get_default_channel_layout(AUDIO_CHANNELS);
 
     if (avcodec_open2(avctx, codec, NULL) < 0) {
         fprintf(stderr, "audio: avcodec_open2 failed\n");
@@ -274,7 +275,7 @@ static int decode_and_buffer(airplay_audio_ctx_t *ctx,
     while (avcodec_receive_frame(avctx, frame) == 0) {
         /* Convert to interleaved S16LE */
         int samples = frame->nb_samples;
-        int ch      = frame->ch_layout.nb_channels;
+        int ch      = frame->channels;
         size_t pcm_bytes = samples * ch * sizeof(int16_t);
 
         uint8_t *pcm_buf = malloc(pcm_bytes);

@@ -1,147 +1,184 @@
+/*
+ * pipeline.c — FFmpeg-based video pipeline
+ *
+ * Portable baseline implementation using libavcodec for H.264/H.265
+ * decode and H.264 encode, libswscale for YUV scaling/compositing.
+ *
+ * On Allwinner A733, FFmpeg can use CedarVE hardware acceleration via
+ * the V4L2 M2M (cedrus) stateless decoder when available.  The encoder
+ * defaults to libx264 software; hardware encode can be added later.
+ *
+ * Flow:
+ *   Input H.264/H.265 → avcodec decode → YUV420P frame
+ *   Camera NV12        → (passed in raw)
+ *   Both frames        → sws_scale composite → YUV420P frame
+ *   Composited frame   → avcodec encode → H.264 output
+ */
 #include "pipeline.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <rockchip/rk_mpi.h>
-#include <rockchip/mpp_buffer.h>
-#include <rockchip/mpp_frame.h>
-#include <rockchip/mpp_packet.h>
-#include <rga/RgaApi.h>
-#include <rga/im2d.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/frame.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
+#include <libswscale/swscale.h>
 
 struct pipeline {
-    /* Decoders (RKVDEC2 — separate contexts for H.264 and H.265) */
-    MppCtx   dec_h264_ctx;
-    MppApi  *dec_h264_mpi;
-    MppCtx   dec_h265_ctx;
-    MppApi  *dec_h265_mpi;
+    /* Decoders */
+    AVCodecContext *dec_h264;
+    AVCodecContext *dec_h265;
 
-    /* Encoder (Hantro H1 — H.264 only, RK3566 has no HW H.265 encode) */
-    MppCtx   enc_ctx;
-    MppApi  *enc_mpi;
-    MppEncCfg enc_cfg;
+    /* Encoder (H.264, typically libx264) */
+    AVCodecContext *enc;
 
-    /* Buffers */
-    MppBufferGroup buf_group;
-    MppFrame dec_frame;      /* last decoded frame */
-    MppFrame comp_frame;     /* composited output frame */
-    MppBuffer comp_buf;      /* composite frame buffer */
+    /* Last decoded frame (format depends on decoder, usually YUV420P) */
+    AVFrame *dec_frame;
+    int dec_valid;
 
-    /* Output */
+    /* Composite output (YUV420P, out_w × out_h) */
+    AVFrame *comp_frame;
+
+    /* Temp frame for sub-region scaling in split mode */
+    AVFrame *tmp_frame;
+
+    /* Packet for encoder output */
+    AVPacket *enc_pkt;
+
+    /* Encoded output buffer (caller-safe copy) */
     uint8_t *enc_output;
-    size_t   enc_output_size;
+    size_t enc_output_cap;
 
-    int out_w;
-    int out_h;
-    int fps;
+    int out_w, out_h, fps;
+    int64_t pts;
 };
 
-static int init_mpp_decoder(MppCtx *ctx, MppApi **mpi, MppCodingType coding,
-                             const char *name)
+/* ---- Scale source frame into a destination AVFrame ---- */
+
+static int scale_into(const uint8_t *const src_data[], const int src_linesize[],
+                       int src_w, int src_h, enum AVPixelFormat src_fmt,
+                       AVFrame *dst)
 {
-    MPP_RET ret;
+    struct SwsContext *sws = sws_getContext(
+        src_w, src_h, src_fmt,
+        dst->width, dst->height, (enum AVPixelFormat)dst->format,
+        SWS_BILINEAR, NULL, NULL, NULL);
+    if (!sws) return -1;
 
-    ret = mpp_create(ctx, mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: mpp_create %s decoder failed: %d\n", name, ret);
-        return -1;
-    }
-
-    ret = mpp_init(*ctx, MPP_CTX_DEC, coding);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: mpp_init %s decoder failed: %d\n", name, ret);
-        return -1;
-    }
-
-    /* Enable split mode for fragmented input */
-    int need_split = 1;
-    MppParam param = &need_split;
-    (*mpi)->control(*ctx, MPP_DEC_SET_PARSER_SPLIT_MODE, param);
-
-    printf("pipeline: %s decoder initialized (RKVDEC2)\n", name);
+    sws_scale(sws, src_data, src_linesize, 0, src_h,
+              dst->data, dst->linesize);
+    sws_freeContext(sws);
     return 0;
 }
 
-static int init_decoders(pipeline_t *p)
+/* ---- Copy YUV420P sub-frame into a region of the composite ---- */
+
+static void blit_yuv420p(AVFrame *dst, const AVFrame *src, int x_offset)
 {
-    /* H.264 decoder — used for Android Auto input (always H.264) */
-    if (init_mpp_decoder(&p->dec_h264_ctx, &p->dec_h264_mpi,
-                          MPP_VIDEO_CodingAVC, "H.264") < 0)
-        return -1;
+    int w = src->width;
+    int h = src->height;
 
-    /* H.265 decoder — used for CarPlay/AirPlay input (newer iPhones send HEVC) */
-    if (init_mpp_decoder(&p->dec_h265_ctx, &p->dec_h265_mpi,
-                          MPP_VIDEO_CodingHEVC, "H.265") < 0)
-        return -1;
+    /* Y plane */
+    for (int y = 0; y < h; y++) {
+        memcpy(dst->data[0] + y * dst->linesize[0] + x_offset,
+               src->data[0] + y * src->linesize[0], w);
+    }
 
-    return 0;
+    /* U plane (half resolution) */
+    int hw = w / 2, hh = h / 2, hx = x_offset / 2;
+    for (int y = 0; y < hh; y++) {
+        memcpy(dst->data[1] + y * dst->linesize[1] + hx,
+               src->data[1] + y * src->linesize[1], hw);
+    }
+
+    /* V plane (half resolution) */
+    for (int y = 0; y < hh; y++) {
+        memcpy(dst->data[2] + y * dst->linesize[2] + hx,
+               src->data[2] + y * src->linesize[2], hw);
+    }
 }
 
-static int init_encoder(pipeline_t *p)
+/* ---- Decoder init ---- */
+
+static AVCodecContext *open_decoder(enum AVCodecID id, const char *name)
 {
-    MPP_RET ret;
-
-    ret = mpp_create(&p->enc_ctx, &p->enc_mpi);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: mpp_create encoder failed: %d\n", ret);
-        return -1;
+    AVCodec *codec = avcodec_find_decoder(id);
+    if (!codec) {
+        fprintf(stderr, "pipeline: %s decoder not found\n", name);
+        return NULL;
     }
 
-    /*
-     * Encode is H.264 ONLY — the Hantro H1 on RK3566 does not support H.265.
-     * Output to car must be H.264 anyway (Android Auto protocol requirement).
-     */
-    ret = mpp_init(p->enc_ctx, MPP_CTX_ENC, MPP_VIDEO_CodingAVC);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: mpp_init encoder failed: %d\n", ret);
-        return -1;
+    AVCodecContext *ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return NULL;
+
+    if (avcodec_open2(ctx, codec, NULL) < 0) {
+        fprintf(stderr, "pipeline: %s decoder open failed\n", name);
+        avcodec_free_context(&ctx);
+        return NULL;
     }
 
-    /* Configure encoder */
-    ret = mpp_enc_cfg_init(&p->enc_cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: mpp_enc_cfg_init failed: %d\n", ret);
-        return -1;
-    }
-
-    mpp_enc_cfg_set_s32(p->enc_cfg, "prep:width", p->out_w);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "prep:height", p->out_h);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "prep:hor_stride", p->out_w);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "prep:ver_stride", p->out_h);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "prep:format", MPP_FMT_YUV420SP); /* NV12 */
-
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:mode", MPP_ENC_RC_MODE_CBR);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:bps_target", 4000000);  /* 4 Mbps */
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:bps_max", 6000000);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:bps_min", 2000000);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:fps_in_num", p->fps);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:fps_in_denorm", 1);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:fps_out_num", p->fps);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:fps_out_denorm", 1);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "rc:gop", p->fps); /* keyframe every second */
-
-    mpp_enc_cfg_set_s32(p->enc_cfg, "codec:type", MPP_VIDEO_CodingAVC);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "h264:profile", 100); /* High profile */
-    mpp_enc_cfg_set_s32(p->enc_cfg, "h264:level", 31);    /* Level 3.1 */
-    mpp_enc_cfg_set_s32(p->enc_cfg, "h264:cabac_en", 1);
-    mpp_enc_cfg_set_s32(p->enc_cfg, "h264:trans8x8", 1);
-
-    ret = p->enc_mpi->control(p->enc_ctx, MPP_ENC_SET_CFG, p->enc_cfg);
-    if (ret != MPP_OK) {
-        fprintf(stderr, "pipeline: encoder config failed: %d\n", ret);
-        return -1;
-    }
-
-    /* Allocate output buffer */
-    p->enc_output_size = p->out_w * p->out_h; /* generous, H.264 is smaller */
-    p->enc_output = malloc(p->enc_output_size);
-
-    printf("pipeline: H.264 encoder initialized (Hantro H1) %dx%d@%dfps\n",
-           p->out_w, p->out_h, p->fps);
-    printf("pipeline: NOTE — encode is H.264 only (no HW H.265 encode on RK3566)\n");
-    return 0;
+    printf("pipeline: %s decoder initialized (%s)\n", name, codec->name);
+    return ctx;
 }
+
+/* ---- Encoder init ---- */
+
+static AVCodecContext *open_encoder(int w, int h, int fps)
+{
+    AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+    if (!codec) {
+        fprintf(stderr, "pipeline: H.264 encoder not found\n");
+        return NULL;
+    }
+
+    AVCodecContext *ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return NULL;
+
+    ctx->width       = w;
+    ctx->height      = h;
+    ctx->time_base   = (AVRational){1, fps};
+    ctx->framerate   = (AVRational){fps, 1};
+    ctx->pix_fmt     = AV_PIX_FMT_YUV420P;
+    ctx->bit_rate    = 4000000;    /* 4 Mbps */
+    ctx->gop_size    = fps;        /* keyframe every second */
+    ctx->max_b_frames = 0;         /* low latency */
+
+    /* libx264-specific low-latency settings (ignored by other encoders) */
+    av_opt_set(ctx->priv_data, "preset", "ultrafast", 0);
+    av_opt_set(ctx->priv_data, "tune", "zerolatency", 0);
+
+    if (avcodec_open2(ctx, codec, NULL) < 0) {
+        fprintf(stderr, "pipeline: H.264 encoder open failed\n");
+        avcodec_free_context(&ctx);
+        return NULL;
+    }
+
+    printf("pipeline: H.264 encoder initialized (%s) %dx%d@%dfps\n",
+           codec->name, w, h, fps);
+    return ctx;
+}
+
+/* ---- Allocate a YUV420P AVFrame ---- */
+
+static AVFrame *alloc_yuv420p_frame(int w, int h)
+{
+    AVFrame *f = av_frame_alloc();
+    if (!f) return NULL;
+
+    f->format = AV_PIX_FMT_YUV420P;
+    f->width  = w;
+    f->height = h;
+
+    if (av_frame_get_buffer(f, 32) < 0) {
+        av_frame_free(&f);
+        return NULL;
+    }
+    return f;
+}
+
+/* ---- Public API ---- */
 
 pipeline_t *pipeline_init(int output_w, int output_h, int fps)
 {
@@ -150,30 +187,32 @@ pipeline_t *pipeline_init(int output_w, int output_h, int fps)
 
     p->out_w = output_w;
     p->out_h = output_h;
-    p->fps = fps;
+    p->fps   = fps;
 
-    /* Buffer group for intermediate frames */
-    if (mpp_buffer_group_get_internal(&p->buf_group, MPP_BUFFER_TYPE_DRM) != MPP_OK) {
-        fprintf(stderr, "pipeline: buffer group init failed\n");
-        free(p);
-        return NULL;
-    }
+    /* H.264 decoder is required (AA always sends H.264) */
+    p->dec_h264 = open_decoder(AV_CODEC_ID_H264, "H.264");
+    if (!p->dec_h264) { free(p); return NULL; }
 
-    /* Allocate composite frame buffer (NV12 = w * h * 1.5) */
-    size_t comp_size = output_w * output_h * 3 / 2;
-    if (mpp_buffer_get(p->buf_group, &p->comp_buf, comp_size) != MPP_OK) {
-        fprintf(stderr, "pipeline: composite buffer alloc failed\n");
-        mpp_buffer_group_put(p->buf_group);
-        free(p);
-        return NULL;
-    }
+    /* H.265 decoder is optional (CarPlay may send HEVC) */
+    p->dec_h265 = open_decoder(AV_CODEC_ID_HEVC, "H.265");
 
-    if (init_decoders(p) < 0 || init_encoder(p) < 0) {
+    p->enc = open_encoder(output_w, output_h, fps);
+    if (!p->enc) { pipeline_destroy(p); return NULL; }
+
+    p->dec_frame  = av_frame_alloc();
+    p->comp_frame = alloc_yuv420p_frame(output_w, output_h);
+    p->tmp_frame  = alloc_yuv420p_frame(output_w / 2, output_h);
+    p->enc_pkt    = av_packet_alloc();
+
+    if (!p->dec_frame || !p->comp_frame || !p->tmp_frame || !p->enc_pkt) {
         pipeline_destroy(p);
         return NULL;
     }
 
-    printf("pipeline: initialized %dx%d@%dfps (decode: H.264+H.265, encode: H.264)\n",
+    p->enc_output_cap = output_w * output_h;
+    p->enc_output = malloc(p->enc_output_cap);
+
+    printf("pipeline: initialized %dx%d@%dfps (FFmpeg software)\n",
            output_w, output_h, fps);
     return p;
 }
@@ -181,122 +220,77 @@ pipeline_t *pipeline_init(int output_w, int output_h, int fps)
 int pipeline_decode(pipeline_t *p, const uint8_t *data, size_t len,
                      input_codec_t codec)
 {
-    /* Select decoder based on input codec */
-    MppCtx ctx;
-    MppApi *mpi;
+    AVCodecContext *dec = (codec == CODEC_H265 && p->dec_h265)
+                          ? p->dec_h265 : p->dec_h264;
 
-    if (codec == CODEC_H265) {
-        ctx = p->dec_h265_ctx;
-        mpi = p->dec_h265_mpi;
-    } else {
-        ctx = p->dec_h264_ctx;
-        mpi = p->dec_h264_mpi;
+    /* Wrap input data in a packet without copying */
+    AVPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.data = (uint8_t *)data;
+    pkt.size = (int)len;
+
+    int ret = avcodec_send_packet(dec, &pkt);
+    if (ret < 0) return -1;
+
+    av_frame_unref(p->dec_frame);
+    ret = avcodec_receive_frame(dec, p->dec_frame);
+    if (ret < 0) {
+        p->dec_valid = 0;
+        return -1;
     }
 
-    MppPacket pkt = NULL;
-    MPP_RET ret;
-
-    ret = mpp_packet_init(&pkt, (void *)data, len);
-    if (ret != MPP_OK) return -1;
-
-    mpp_packet_set_pts(pkt, 0);
-    mpp_packet_set_dts(pkt, 0);
-
-    /* Send packet to decoder */
-    ret = mpi->decode_put_packet(ctx, pkt);
-    mpp_packet_deinit(&pkt);
-    if (ret != MPP_OK) return -1;
-
-    /* Get decoded frame — same YUV output regardless of H.264 or H.265 input */
-    MppFrame frame = NULL;
-    ret = mpi->decode_get_frame(ctx, &frame);
-    if (ret != MPP_OK || !frame) return -1;
-
-    /* Store for compositing */
-    if (p->dec_frame)
-        mpp_frame_deinit(&p->dec_frame);
-    p->dec_frame = frame;
-
+    p->dec_valid = 1;
     return 0;
 }
 
 int pipeline_composite(pipeline_t *p, layout_mode_t layout,
                         const uint8_t *camera_nv12, int cam_w, int cam_h)
 {
-    void *comp_ptr = mpp_buffer_get_ptr(p->comp_buf);
-    int comp_fd = mpp_buffer_get_fd(p->comp_buf);
-    (void)comp_ptr;
+    /* Clear composite to black (Y=0, U=V=128) */
+    memset(p->comp_frame->data[0], 0,
+           p->comp_frame->linesize[0] * p->out_h);
+    memset(p->comp_frame->data[1], 128,
+           p->comp_frame->linesize[1] * (p->out_h / 2));
+    memset(p->comp_frame->data[2], 128,
+           p->comp_frame->linesize[2] * (p->out_h / 2));
 
-    if (layout == LAYOUT_FULL_PRIMARY && p->dec_frame) {
-        /* Full screen phone video — just copy/scale decoded frame */
-        MppBuffer dec_buf = mpp_frame_get_buffer(p->dec_frame);
-        int src_w = mpp_frame_get_width(p->dec_frame);
-        int src_h = mpp_frame_get_height(p->dec_frame);
-        int src_stride = mpp_frame_get_hor_stride(p->dec_frame);
-
-        rga_buffer_t src = wrapbuffer_fd(mpp_buffer_get_fd(dec_buf),
-                                          src_w, src_h, RK_FORMAT_YCbCr_420_SP);
-        src.wstride = src_stride;
-        src.hstride = mpp_frame_get_ver_stride(p->dec_frame);
-
-        rga_buffer_t dst = wrapbuffer_fd(comp_fd,
-                                          p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-        dst.wstride = p->out_w;
-        dst.hstride = p->out_h;
-
-        imresize(src, dst);
+    if (layout == LAYOUT_FULL_PRIMARY && p->dec_valid) {
+        /* Full screen phone video */
+        scale_into((const uint8_t *const *)p->dec_frame->data,
+                   p->dec_frame->linesize,
+                   p->dec_frame->width, p->dec_frame->height,
+                   (enum AVPixelFormat)p->dec_frame->format,
+                   p->comp_frame);
 
     } else if (layout == LAYOUT_FULL_CAMERA && camera_nv12) {
-        /* Full screen camera — scale camera NV12 to output */
-        rga_buffer_t src = wrapbuffer_virtualaddr((void *)camera_nv12,
-                                                    cam_w, cam_h, RK_FORMAT_YCbCr_420_SP);
-        rga_buffer_t dst = wrapbuffer_fd(comp_fd,
-                                          p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-        dst.wstride = p->out_w;
-        dst.hstride = p->out_h;
+        /* Full screen camera */
+        const uint8_t *planes[2] = { camera_nv12, camera_nv12 + cam_w * cam_h };
+        int strides[2] = { cam_w, cam_w };
 
-        imresize(src, dst);
+        scale_into(planes, strides, cam_w, cam_h, AV_PIX_FMT_NV12,
+                   p->comp_frame);
 
     } else if (layout == LAYOUT_SPLIT_LEFT_RIGHT) {
-        /* Split screen: phone left (640x720), camera right (640x720) */
-        int half_w = p->out_w / 2;
-
         /* Left half: phone video */
-        if (p->dec_frame) {
-            MppBuffer dec_buf = mpp_frame_get_buffer(p->dec_frame);
-            int src_w = mpp_frame_get_width(p->dec_frame);
-            int src_h = mpp_frame_get_height(p->dec_frame);
-
-            rga_buffer_t src = wrapbuffer_fd(mpp_buffer_get_fd(dec_buf),
-                                              src_w, src_h, RK_FORMAT_YCbCr_420_SP);
-            src.wstride = mpp_frame_get_hor_stride(p->dec_frame);
-            src.hstride = mpp_frame_get_ver_stride(p->dec_frame);
-
-            rga_buffer_t dst = wrapbuffer_fd(comp_fd,
-                                              p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-            dst.wstride = p->out_w;
-            dst.hstride = p->out_h;
-
-            im_rect dst_rect = {0, 0, half_w, p->out_h};
-            improcess(src, dst, (rga_buffer_t){0},
-                      (im_rect){0, 0, src_w, src_h}, dst_rect, (im_rect){0},
-                      0);
+        if (p->dec_valid) {
+            scale_into((const uint8_t *const *)p->dec_frame->data,
+                       p->dec_frame->linesize,
+                       p->dec_frame->width, p->dec_frame->height,
+                       (enum AVPixelFormat)p->dec_frame->format,
+                       p->tmp_frame);
+            blit_yuv420p(p->comp_frame, p->tmp_frame, 0);
         }
 
         /* Right half: camera */
         if (camera_nv12) {
-            rga_buffer_t src = wrapbuffer_virtualaddr((void *)camera_nv12,
-                                                        cam_w, cam_h, RK_FORMAT_YCbCr_420_SP);
+            const uint8_t *planes[2] = {
+                camera_nv12, camera_nv12 + cam_w * cam_h
+            };
+            int strides[2] = { cam_w, cam_w };
 
-            rga_buffer_t dst = wrapbuffer_fd(comp_fd,
-                                              p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-            dst.wstride = p->out_w;
-            dst.hstride = p->out_h;
-
-            im_rect dst_rect = {half_w, 0, half_w, p->out_h};
-            improcess(src, dst, (rga_buffer_t){0},
-                      (im_rect){0, 0, cam_w, cam_h}, dst_rect, (im_rect){0},
-                      0);
+            scale_into(planes, strides, cam_w, cam_h, AV_PIX_FMT_NV12,
+                       p->tmp_frame);
+            blit_yuv420p(p->comp_frame, p->tmp_frame, p->out_w / 2);
         }
     }
 
@@ -305,59 +299,35 @@ int pipeline_composite(pipeline_t *p, layout_mode_t layout,
 
 const uint8_t *pipeline_encode(pipeline_t *p, size_t *out_len)
 {
-    /* Wrap composite buffer as MppFrame for encoder */
-    MppFrame frame = NULL;
-    mpp_frame_init(&frame);
-    mpp_frame_set_width(frame, p->out_w);
-    mpp_frame_set_height(frame, p->out_h);
-    mpp_frame_set_hor_stride(frame, p->out_w);
-    mpp_frame_set_ver_stride(frame, p->out_h);
-    mpp_frame_set_fmt(frame, MPP_FMT_YUV420SP);
-    mpp_frame_set_buffer(frame, p->comp_buf);
+    *out_len = 0;
 
-    /* Send frame to encoder — always H.264 output (Hantro H1) */
-    MPP_RET ret = p->enc_mpi->encode_put_frame(p->enc_ctx, frame);
-    mpp_frame_deinit(&frame);
-    if (ret != MPP_OK) {
-        *out_len = 0;
-        return NULL;
+    p->comp_frame->pts = p->pts++;
+
+    int ret = avcodec_send_frame(p->enc, p->comp_frame);
+    if (ret < 0) return NULL;
+
+    av_packet_unref(p->enc_pkt);
+    ret = avcodec_receive_packet(p->enc, p->enc_pkt);
+    if (ret < 0) return NULL;
+
+    /* Copy to stable output buffer */
+    if ((size_t)p->enc_pkt->size > p->enc_output_cap) {
+        p->enc_output_cap = p->enc_pkt->size;
+        p->enc_output = realloc(p->enc_output, p->enc_output_cap);
     }
+    memcpy(p->enc_output, p->enc_pkt->data, p->enc_pkt->size);
+    *out_len = p->enc_pkt->size;
 
-    /* Get encoded packet */
-    MppPacket pkt = NULL;
-    ret = p->enc_mpi->encode_get_packet(p->enc_ctx, &pkt);
-    if (ret != MPP_OK || !pkt) {
-        *out_len = 0;
-        return NULL;
-    }
-
-    size_t len = mpp_packet_get_length(pkt);
-    void *data = mpp_packet_get_data(pkt);
-
-    if (len > p->enc_output_size) {
-        p->enc_output_size = len;
-        p->enc_output = realloc(p->enc_output, len);
-    }
-    memcpy(p->enc_output, data, len);
-    *out_len = len;
-
-    mpp_packet_deinit(&pkt);
     return p->enc_output;
 }
 
 const uint8_t *pipeline_encode_camera_only(pipeline_t *p,
     const uint8_t *nv12, int w, int h, size_t *out_len)
 {
-    /* Scale camera to composite buffer via RGA */
-    rga_buffer_t src = wrapbuffer_virtualaddr((void *)nv12,
-                                                w, h, RK_FORMAT_YCbCr_420_SP);
-    int comp_fd = mpp_buffer_get_fd(p->comp_buf);
-    rga_buffer_t dst = wrapbuffer_fd(comp_fd,
-                                      p->out_w, p->out_h, RK_FORMAT_YCbCr_420_SP);
-    dst.wstride = p->out_w;
-    dst.hstride = p->out_h;
-    imresize(src, dst);
+    const uint8_t *planes[2] = { nv12, nv12 + w * h };
+    int strides[2] = { w, w };
 
+    scale_into(planes, strides, w, h, AV_PIX_FMT_NV12, p->comp_frame);
     return pipeline_encode(p, out_len);
 }
 
@@ -365,29 +335,13 @@ void pipeline_destroy(pipeline_t *p)
 {
     if (!p) return;
 
-    if (p->dec_frame)
-        mpp_frame_deinit(&p->dec_frame);
-
-    if (p->dec_h264_ctx) {
-        p->dec_h264_mpi->reset(p->dec_h264_ctx);
-        mpp_destroy(p->dec_h264_ctx);
-    }
-    if (p->dec_h265_ctx) {
-        p->dec_h265_mpi->reset(p->dec_h265_ctx);
-        mpp_destroy(p->dec_h265_ctx);
-    }
-    if (p->enc_ctx) {
-        p->enc_mpi->reset(p->enc_ctx);
-        mpp_destroy(p->enc_ctx);
-    }
-    if (p->enc_cfg)
-        mpp_enc_cfg_deinit(p->enc_cfg);
-
-    if (p->comp_buf)
-        mpp_buffer_put(p->comp_buf);
-    if (p->buf_group)
-        mpp_buffer_group_put(p->buf_group);
-
+    if (p->dec_h264)    avcodec_free_context(&p->dec_h264);
+    if (p->dec_h265)    avcodec_free_context(&p->dec_h265);
+    if (p->enc)         avcodec_free_context(&p->enc);
+    if (p->dec_frame)   av_frame_free(&p->dec_frame);
+    if (p->comp_frame)  av_frame_free(&p->comp_frame);
+    if (p->tmp_frame)   av_frame_free(&p->tmp_frame);
+    if (p->enc_pkt)     av_packet_free(&p->enc_pkt);
     free(p->enc_output);
     free(p);
     printf("pipeline: destroyed\n");
