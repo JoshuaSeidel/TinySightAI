@@ -222,13 +222,12 @@ static int load_model(const char *path)
     /* Create input buffer: 640x640x3 UINT8 RGB */
     vip_buffer_create_params_t in_params;
     memset(&in_params, 0, sizeof(in_params));
-    in_params.data_format = VIP_BUFFER_FORMAT_TENSOR;
+    in_params.data_format = VIP_BUFFER_FORMAT_UINT8;
     in_params.num_of_dims = 4;
     in_params.sizes[0] = MODEL_INPUT_W;
     in_params.sizes[1] = MODEL_INPUT_H;
     in_params.sizes[2] = MODEL_INPUT_CH;
     in_params.sizes[3] = 1;
-    in_params.data_type = VIP_BUFFER_QUANTIZE_NONE;
     in_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
 
     status = vip_create_buffer(&in_params, sizeof(in_params),
@@ -245,12 +244,11 @@ static int load_model(const char *path)
     /* Create output buffer: YOLOv8n output [1, 84, 8400] float32 */
     vip_buffer_create_params_t out_params;
     memset(&out_params, 0, sizeof(out_params));
-    out_params.data_format = VIP_BUFFER_FORMAT_TENSOR;
+    out_params.data_format = VIP_BUFFER_FORMAT_FP32;
     out_params.num_of_dims = 3;
     out_params.sizes[0] = 8400;
     out_params.sizes[1] = 84;
     out_params.sizes[2] = 1;
-    out_params.data_type = VIP_BUFFER_QUANTIZE_NONE;
     out_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
 
     status = vip_create_buffer(&out_params, sizeof(out_params),
@@ -283,10 +281,9 @@ static void run_inference(const uint8_t *rgb, int w, int h,
     vip_status_e status;
 
     /* Copy RGB data into input buffer */
-    void *in_ptr = NULL;
-    status = vip_map_buffer(g_ai.input_buf, &in_ptr);
-    if (status != VIP_SUCCESS || !in_ptr) {
-        fprintf(stderr, "baby_ai: vip_map_buffer (input) failed: %d\n", status);
+    void *in_ptr = vip_map_buffer(g_ai.input_buf);
+    if (!in_ptr) {
+        fprintf(stderr, "baby_ai: vip_map_buffer (input) failed\n");
         return;
     }
     memcpy(in_ptr, rgb, (size_t)w * h * 3);
@@ -318,10 +315,9 @@ static void run_inference(const uint8_t *rgb, int w, int h,
     }
 
     /* Read output data */
-    void *out_ptr = NULL;
-    status = vip_map_buffer(g_ai.output_buf, &out_ptr);
-    if (status != VIP_SUCCESS || !out_ptr) {
-        fprintf(stderr, "baby_ai: vip_map_buffer (output) failed: %d\n", status);
+    void *out_ptr = vip_map_buffer(g_ai.output_buf);
+    if (!out_ptr) {
+        fprintf(stderr, "baby_ai: vip_map_buffer (output) failed\n");
         return;
     }
 
