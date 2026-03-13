@@ -11,12 +11,13 @@
 ///
 /// Maximum frame payload before fragmentation: 16384 bytes (16 KiB).
 use std::io;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 // ---------------------------------------------------------------------------
 // Channel constants
 // ---------------------------------------------------------------------------
+#[allow(dead_code)]
 pub mod channel {
     pub const CONTROL: u8 = 0;
     pub const INPUT: u8 = 1;
@@ -38,6 +39,7 @@ pub mod channel {
 // ---------------------------------------------------------------------------
 // Flag constants
 // ---------------------------------------------------------------------------
+#[allow(dead_code)]
 pub mod flags {
     pub const FIRST_FRAGMENT: u8 = 0x08;
     pub const LAST_FRAGMENT: u8 = 0x04;
@@ -61,6 +63,7 @@ pub struct AapFrame {
     /// Channel the message belongs to.
     pub channel: u8,
     /// Flags byte from the last (or only) physical frame.
+    #[allow(dead_code)]
     pub flags: u8,
     /// Message type identifier.
     pub msg_type: u16,
@@ -283,11 +286,13 @@ impl<W: AsyncWrite + Unpin> AapFrameWriter<W> {
     }
 
     /// Flush the underlying writer.
+    #[allow(dead_code)]
     pub async fn flush(&mut self) -> io::Result<()> {
         self.inner.flush().await
     }
 
     /// Consume the writer and return the inner sink.
+    #[allow(dead_code)]
     pub fn into_inner(self) -> W {
         self.inner
     }

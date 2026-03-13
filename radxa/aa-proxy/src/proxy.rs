@@ -12,12 +12,12 @@
 /// `ProxySession`.
 use std::io;
 
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::server::TlsStream;
 
-use crate::aap::{AapFrame, AapFrameReader, AapFrameWriter};
+use crate::aap::{AapFrameReader, AapFrameWriter};
 use crate::mitm::MitmLayer;
 
 /// Statistics collected during a session; useful for debugging.
@@ -211,7 +211,7 @@ pub async fn run_standalone_session(
     mitm: MitmLayer,
     mut phone_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> SessionEnd {
-    use crate::aap::{AapFrame, AapFrameReader, AapFrameWriter, channel, flags};
+    use crate::aap::{AapFrame, AapFrameReader, AapFrameWriter, channel};
     use std::time::Duration;
 
     info!("Standalone session started (compositor → car, no phone)");
