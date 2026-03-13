@@ -230,9 +230,11 @@ done
 ok "Allwinner vendor libraries copied (if present)"
 
 # VeriSilicon VIPLite NPU runtime (VIP9000 — baby AI inference)
-for lib in /usr/lib/aarch64-linux-gnu/libVIPlite* \
-           /usr/lib/aarch64-linux-gnu/libVIPuser* \
-           /usr/lib/libVIPlite* /usr/lib/libVIPuser*; do
+# v2.0 (A733): libVIPhal + libNBGlinker; v1.13: libVIPlite + libVIPuser
+for lib in /usr/lib/libVIPhal* /usr/lib/libNBGlinker* \
+           /usr/lib/libVIPlite* /usr/lib/libVIPuser* \
+           /usr/lib/aarch64-linux-gnu/libVIPhal* /usr/lib/aarch64-linux-gnu/libNBGlinker* \
+           /usr/lib/aarch64-linux-gnu/libVIPlite* /usr/lib/aarch64-linux-gnu/libVIPuser*; do
     [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/" 2>/dev/null || true
 done
 ok "VIPLite NPU libraries copied (if present)"

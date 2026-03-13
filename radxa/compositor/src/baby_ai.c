@@ -6,10 +6,11 @@
  * A dedicated inference thread runs at ~1 fps, independent of the
  * 30 fps video pipeline.
  *
- * Build requires: VIPLite runtime (libVIPlite.so, libVIPuser.so)
+ * Build requires: VIPLite runtime from ZIFENG278/ai-sdk
  *   - Header: vip_lite.h (from VeriSilicon VIPLite SDK)
- *   - Libraries: libVIPlite.so, libVIPuser.so
- *   - Kernel module: galcore.ko (/dev/galcore)
+ *   - A733 v2.0: libVIPhal.so, libNBGlinker.so
+ *   - Older v1.13: libVIPlite.so, libVIPuser.so
+ *   - Kernel driver: /dev/vipcore (Allwinner vendor kernel)
  *   - Model: YOLOv8n INT8 NBG (.nb) file
  *
  * Model preparation (done once on x86 dev machine):

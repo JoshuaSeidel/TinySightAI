@@ -10,8 +10,13 @@ FFMPEG_CFLAGS := $(shell pkg-config --cflags libavcodec libavutil libswscale 2>/
 FFMPEG_LIBS   := $(shell pkg-config --libs libavcodec libavutil libswscale 2>/dev/null)
 CFLAGS += $(FFMPEG_CFLAGS)
 
-# NPU: check for VeriSilicon VIPLite runtime (VIP9000 on Allwinner A733)
-ifneq ($(wildcard /usr/lib/libVIPlite.so /usr/lib/aarch64-linux-gnu/libVIPlite.so),)
+# NPU: VeriSilicon VIP9000 on Allwinner A733
+# v2.0 (A733): libVIPhal.so + libNBGlinker.so
+# v1.13 (older): libVIPlite.so + libVIPuser.so
+ifneq ($(wildcard /usr/lib/libVIPhal.so /usr/lib/aarch64-linux-gnu/libVIPhal.so),)
+CFLAGS += -I/usr/include/VIPLite
+LDFLAGS = -ldrm -lpthread -lm -lVIPhal -lNBGlinker $(FFMPEG_LIBS)
+else ifneq ($(wildcard /usr/lib/libVIPlite.so /usr/lib/aarch64-linux-gnu/libVIPlite.so),)
 CFLAGS += -I/usr/include/VIPLite
 LDFLAGS = -ldrm -lpthread -lm -lVIPlite -lVIPuser $(FFMPEG_LIBS)
 else

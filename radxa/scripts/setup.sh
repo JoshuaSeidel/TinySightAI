@@ -112,14 +112,58 @@ apt-get install -y \
 ok "All system packages installed"
 record_ok "System packages"
 
-# Check for VeriSilicon VIPLite NPU runtime (VIP9000 on Allwinner A733)
-if [ -f /usr/lib/libVIPlite.so ] || [ -f /usr/lib/aarch64-linux-gnu/libVIPlite.so ]; then
-    ok "VIPLite NPU runtime found — AI inference will use VIP9000 NPU"
+# Install VeriSilicon VIPLite NPU SDK (VIP9000 on Allwinner A733)
+# No apt packages exist — must clone and install from source.
+# A733 uses NPU v2.0: libraries are libVIPhal.so + libNBGlinker.so
+NPU_SDK_DIR="/tmp/ai-sdk"
+if [ -f /usr/lib/libVIPhal.so ] && [ -f /usr/lib/libNBGlinker.so ]; then
+    ok "VIPLite NPU runtime already installed"
     record_ok "VIPLite NPU runtime"
 else
-    warn "VIPLite NPU runtime (libVIPlite.so) not found — AI features will build as stub"
-    warn "Install VIPLite SDK from Radxa/Allwinner vendor packages if NPU support is needed"
-    record_warn "VIPLite NPU runtime: not found (AI stub mode)"
+    echo "  Installing VIPLite NPU SDK from source..."
+    rm -rf "$NPU_SDK_DIR"
+    if git clone --depth 1 https://github.com/ZIFENG278/ai-sdk.git "$NPU_SDK_DIR" 2>/dev/null; then
+        # Install VIPLite v2.0 libraries and headers for A733
+        SDK_LIB="$NPU_SDK_DIR/viplite-tina/lib/aarch64-none-linux-gnu/v2.0"
+        if [ -d "$SDK_LIB" ]; then
+            # Copy libraries
+            cp -a "$SDK_LIB"/lib*.so* /usr/lib/ 2>/dev/null || true
+            # Copy headers
+            mkdir -p /usr/include/VIPLite
+            cp -a "$SDK_LIB"/inc/*.h /usr/include/VIPLite/ 2>/dev/null || true
+            cp -a "$SDK_LIB"/inc/*.h /usr/include/ 2>/dev/null || true
+            ldconfig
+            ok "VIPLite NPU SDK installed (v2.0 for A733)"
+            record_ok "VIPLite NPU runtime"
+        else
+            warn "VIPLite v2.0 libraries not found in ai-sdk — trying v1.13 fallback"
+            SDK_LIB_OLD="$NPU_SDK_DIR/viplite-tina/lib/aarch64-none-linux-gnu/v1.13"
+            if [ -d "$SDK_LIB_OLD" ]; then
+                cp -a "$SDK_LIB_OLD"/lib*.so* /usr/lib/ 2>/dev/null || true
+                mkdir -p /usr/include/VIPLite
+                cp -a "$SDK_LIB_OLD"/inc/*.h /usr/include/VIPLite/ 2>/dev/null || true
+                cp -a "$SDK_LIB_OLD"/inc/*.h /usr/include/ 2>/dev/null || true
+                ldconfig
+                ok "VIPLite NPU SDK installed (v1.13 fallback)"
+                record_ok "VIPLite NPU runtime (v1.13)"
+            else
+                warn "No VIPLite libraries found in ai-sdk"
+                record_warn "VIPLite NPU runtime: SDK clone OK but no libs found"
+            fi
+        fi
+        rm -rf "$NPU_SDK_DIR"
+    else
+        warn "Failed to clone ai-sdk — NPU features will build as stub"
+        record_warn "VIPLite NPU runtime: git clone failed (AI stub mode)"
+    fi
+fi
+
+# Verify NPU kernel driver
+if [ -c /dev/vipcore ]; then
+    ok "NPU kernel driver present (/dev/vipcore)"
+else
+    warn "NPU kernel driver /dev/vipcore not found — vendor kernel may be needed"
+    warn "See: https://github.com/cubie-image/sun55iw3p1/releases for kernel .deb"
 fi
 
 # Immediately stop hostapd/dnsmasq if apt postinst auto-started them.
