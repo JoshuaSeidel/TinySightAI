@@ -229,15 +229,18 @@ for lib in /usr/lib/aarch64-linux-gnu/libcedar* \
 done
 ok "Allwinner vendor libraries copied (if present)"
 
-# VeriSilicon VIPLite NPU runtime (VIP9000 — baby AI inference)
+# VeriSilicon VIPLite NPU runtime + awnn wrapper (VIP9000 — baby AI inference)
 # v2.0 (A733): libVIPhal + libNBGlinker; v1.13: libVIPlite + libVIPuser
+# libawnn.so wraps VIPLite (built by setup.sh from ai-sdk)
 for lib in /usr/lib/libVIPhal* /usr/lib/libNBGlinker* \
            /usr/lib/libVIPlite* /usr/lib/libVIPuser* \
+           /usr/lib/libawnn* \
            /usr/lib/aarch64-linux-gnu/libVIPhal* /usr/lib/aarch64-linux-gnu/libNBGlinker* \
-           /usr/lib/aarch64-linux-gnu/libVIPlite* /usr/lib/aarch64-linux-gnu/libVIPuser*; do
+           /usr/lib/aarch64-linux-gnu/libVIPlite* /usr/lib/aarch64-linux-gnu/libVIPuser* \
+           /usr/lib/aarch64-linux-gnu/libawnn*; do
     [ -f "$lib" ] && cp -a "$lib" "$NEWROOT/usr/lib/aarch64-linux-gnu/" 2>/dev/null || true
 done
-ok "VIPLite NPU libraries copied (if present)"
+ok "VIPLite NPU + awnn libraries copied (if present)"
 
 ok "Runtime packages installed ($(chroot "$NEWROOT" dpkg --list | grep '^ii' | wc -l) packages)"
 

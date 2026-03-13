@@ -1,26 +1,21 @@
 /*
  * baby_ai.c — AI Baby Monitoring via Allwinner A733 NPU
  *
- * Uses VeriSilicon VIPLite API to run YOLOv8n object detection on camera
- * frames via the VIP9000 NPU (3 TOPS @ INT8 on Allwinner A733).
+ * Uses the awnn wrapper library (over VeriSilicon VIPLite) to run YOLOv5s
+ * object detection on camera frames via the VIP9000 NPU (3 TOPS @ INT8).
  * A dedicated inference thread runs at ~1 fps, independent of the
  * 30 fps video pipeline.
  *
- * Build requires: VIPLite runtime from ZIFENG278/ai-sdk
- *   - Header: vip_lite.h (from VeriSilicon VIPLite SDK)
- *   - A733 v2.0: libVIPhal.so, libNBGlinker.so
- *   - Older v1.13: libVIPlite.so, libVIPuser.so
+ * Build requires: libawnn.so (built from ZIFENG278/ai-sdk during setup.sh)
+ *   - awnn wraps VIPLite and handles buffer creation, dequantization
  *   - Kernel driver: /dev/vipcore (Allwinner vendor kernel)
- *   - Model: YOLOv8n INT8 NBG (.nb) file
+ *   - Model: YOLOv5s INT8 NBG (.nb) file from ai-sdk examples
  *
- * Model preparation (done once on x86 dev machine):
- *   1. Export YOLOv8n to ONNX:
- *        yolo export model=yolov8n.pt format=onnx imgsz=640
- *   2. Convert ONNX → NBG using VeriSilicon Acuity Toolkit:
- *        acuitylite quantize --model yolov8n.onnx --dtype int8 ...
- *        acuitylite export --model ... --target vip9000 --format nbg
- *   3. Deploy:
- *        scp yolov8n.nb radxa:/opt/aadongle/models/baby_detect.nb
+ * Model: examples/yolov5/model/v2/yolov5.nb from ZIFENG278/ai-sdk
+ *   - Input: 640x640x3 UINT8 NCHW (channel-first RGB, 0-255)
+ *   - Output: 3 heads (P8/P16/P32), each [1, 3, H, W, 85]
+ *     H/W = 80/40/20, anchors = 3 per head, 85 = 4 box + 1 obj + 80 classes
+ *   - COCO class 0 = person (used for baby detection)
  */
 
 #include "baby_ai.h"
@@ -33,10 +28,10 @@
 #include <time.h>
 #include <math.h>
 
-/* VIPLite NPU API — conditionally included.
- * If building without VIPLite SDK, define BABY_AI_STUB to compile a no-op stub. */
+/* awnn library — conditionally included.
+ * If building without awnn/VIPLite, define BABY_AI_STUB for no-op stub. */
 #ifndef BABY_AI_STUB
-#include <vip_lite.h>
+#include <awnn_lib.h>
 #endif
 
 #define DEFAULT_MODEL_PATH "/opt/aadongle/models/baby_detect.nb"
@@ -58,15 +53,25 @@
 /* Frame differencing: percentage of changed pixels for motion score */
 #define MOTION_DIFF_THRESHOLD  15  /* Y-channel delta to count as "changed" */
 
+/* YOLOv5 anchor definitions (standard COCO anchors) */
+#define NUM_HEADS    3
+#define NUM_ANCHORS  3
+#define NUM_CLASSES  80
+#define NUM_ATTRS    (4 + 1 + NUM_CLASSES)  /* x,y,w,h + objectness + classes */
+
+static const float ANCHORS[NUM_HEADS][NUM_ANCHORS][2] = {
+    {{10, 13}, {16, 30},  {33, 23}},     /* P3/8  — 80x80 grid */
+    {{30, 61}, {62, 45},  {59, 119}},    /* P4/16 — 40x40 grid */
+    {{116, 90}, {156, 198}, {373, 326}}  /* P5/32 — 20x20 grid */
+};
+static const int STRIDES[NUM_HEADS] = {8, 16, 32};
+static const int GRID_SIZES[NUM_HEADS] = {80, 40, 20};
+
 /* ---- Internal state ---- */
 
 typedef struct {
 #ifndef BABY_AI_STUB
-    vip_network     network;
-    vip_buffer      input_buf;
-    vip_buffer      output_buf;
-    uint8_t        *nbg_data;      /* loaded NBG model data (kept for lifetime) */
-    vip_uint32_t    nbg_size;
+    Awnn_Context_t *ctx;
 #endif
     bool            model_loaded;
 
@@ -90,8 +95,8 @@ typedef struct {
     pthread_mutex_t status_lock;
     baby_ai_status_t status;
 
-    /* RGB conversion buffer for model input */
-    uint8_t        *rgb_buf;
+    /* NCHW conversion buffer for model input (3 * 640 * 640) */
+    uint8_t        *nchw_buf;
 } baby_ai_ctx_t;
 
 static baby_ai_ctx_t g_ai;
@@ -105,15 +110,27 @@ static uint64_t monotonic_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
+static float sigmoid(float x)
+{
+    return 1.0f / (1.0f + expf(-x));
+}
+
 /*
- * Convert NV12 to RGB888 with resize to MODEL_INPUT_W x MODEL_INPUT_H.
+ * Convert NV12 to NCHW uint8 RGB with resize to MODEL_INPUT_W x MODEL_INPUT_H.
+ * Output layout: [R plane][G plane][B plane], each 640*640 bytes.
  * Uses nearest-neighbor sampling for speed (AI model doesn't need bilinear).
+ * No normalization — model handles 1/255 scaling internally.
  */
-static void nv12_to_rgb_resize(const uint8_t *nv12, int src_w, int src_h,
-                                uint8_t *rgb, int dst_w, int dst_h)
+static void nv12_to_nchw_resize(const uint8_t *nv12, int src_w, int src_h,
+                                 uint8_t *nchw, int dst_w, int dst_h)
 {
     const uint8_t *y_plane = nv12;
     const uint8_t *uv_plane = nv12 + src_w * src_h;
+    int plane_size = dst_w * dst_h;
+
+    uint8_t *r_plane = nchw;
+    uint8_t *g_plane = nchw + plane_size;
+    uint8_t *b_plane = nchw + plane_size * 2;
 
     for (int dy = 0; dy < dst_h; dy++) {
         int sy = dy * src_h / dst_h;
@@ -133,10 +150,10 @@ static void nv12_to_rgb_resize(const uint8_t *nv12, int src_w, int src_h,
             int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
             int b = (298 * c + 516 * d + 128) >> 8;
 
-            int out_idx = (dy * dst_w + dx) * 3;
-            rgb[out_idx + 0] = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
-            rgb[out_idx + 1] = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
-            rgb[out_idx + 2] = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
+            int idx = dy * dst_w + dx;
+            r_plane[idx] = (uint8_t)(r < 0 ? 0 : (r > 255 ? 255 : r));
+            g_plane[idx] = (uint8_t)(g < 0 ? 0 : (g > 255 ? 255 : g));
+            b_plane[idx] = (uint8_t)(b < 0 ? 0 : (b > 255 ? 255 : b));
         }
     }
 }
@@ -168,197 +185,116 @@ static float compute_motion(const uint8_t *y_cur, const uint8_t *y_prev,
     return total > 0 ? (float)changed / (float)total : 0.0f;
 }
 
-/* ---- VIPLite NPU inference ---- */
+/* ---- NPU inference via awnn ---- */
 
 #ifndef BABY_AI_STUB
 
 static int load_model(const char *path)
 {
-    /* Read NBG model file */
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "baby_ai: cannot open model: %s\n", path);
-        return -1;
-    }
-    fseek(f, 0, SEEK_END);
-    long model_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    awnn_init();
 
-    g_ai.nbg_data = malloc(model_size);
-    if (!g_ai.nbg_data) {
-        fclose(f);
-        return -1;
-    }
-    if (fread(g_ai.nbg_data, 1, model_size, f) != (size_t)model_size) {
-        free(g_ai.nbg_data);
-        g_ai.nbg_data = NULL;
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-    g_ai.nbg_size = (vip_uint32_t)model_size;
-
-    /* Initialize VIPLite runtime */
-    vip_status_e status = vip_init();
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_init failed: %d\n", status);
-        free(g_ai.nbg_data);
-        g_ai.nbg_data = NULL;
+    g_ai.ctx = awnn_create(path);
+    if (!g_ai.ctx) {
+        fprintf(stderr, "baby_ai: awnn_create failed for %s\n", path);
+        awnn_uninit();
         return -1;
     }
 
-    /* Create network from NBG binary */
-    status = vip_create_network(g_ai.nbg_data, g_ai.nbg_size,
-                                VIP_CREATE_NETWORK_FROM_MEMORY,
-                                &g_ai.network);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_create_network failed: %d\n", status);
-        free(g_ai.nbg_data);
-        g_ai.nbg_data = NULL;
-        vip_destroy();
-        return -1;
-    }
-
-    /* Create input buffer: 640x640x3 UINT8 RGB */
-    vip_buffer_create_params_t in_params;
-    memset(&in_params, 0, sizeof(in_params));
-    in_params.data_format = VIP_BUFFER_FORMAT_UINT8;
-    in_params.num_of_dims = 4;
-    in_params.sizes[0] = MODEL_INPUT_W;
-    in_params.sizes[1] = MODEL_INPUT_H;
-    in_params.sizes[2] = MODEL_INPUT_CH;
-    in_params.sizes[3] = 1;
-    in_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
-
-    status = vip_create_buffer(&in_params, sizeof(in_params),
-                               &g_ai.input_buf);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_create_buffer (input) failed: %d\n", status);
-        vip_destroy_network(g_ai.network);
-        free(g_ai.nbg_data);
-        g_ai.nbg_data = NULL;
-        vip_destroy();
-        return -1;
-    }
-
-    /* Create output buffer: YOLOv8n output [1, 84, 8400] float32 */
-    vip_buffer_create_params_t out_params;
-    memset(&out_params, 0, sizeof(out_params));
-    out_params.data_format = VIP_BUFFER_FORMAT_FP32;
-    out_params.num_of_dims = 3;
-    out_params.sizes[0] = 8400;
-    out_params.sizes[1] = 84;
-    out_params.sizes[2] = 1;
-    out_params.quant_format = VIP_BUFFER_QUANTIZE_NONE;
-
-    status = vip_create_buffer(&out_params, sizeof(out_params),
-                               &g_ai.output_buf);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_create_buffer (output) failed: %d\n", status);
-        vip_destroy_buffer(g_ai.input_buf);
-        vip_destroy_network(g_ai.network);
-        free(g_ai.nbg_data);
-        g_ai.nbg_data = NULL;
-        vip_destroy();
-        return -1;
-    }
-
-    printf("baby_ai: model loaded (%ld bytes, VIP9000 NPU)\n", model_size);
-
+    printf("baby_ai: model loaded via awnn (VIP9000 NPU): %s\n", path);
     g_ai.model_loaded = true;
     return 0;
 }
 
 /*
- * Run YOLOv8n inference on an RGB image.
- * Parses the output tensor for person detections.
+ * Parse YOLOv5 output head for person detections.
+ *
+ * Each head has shape [1, 3, grid_h, grid_w, 85] (auto-dequantized to float32).
+ * Layout in memory (row-major): anchor, row, col, attr.
+ *
+ * Updates best_* if a higher-confidence person detection is found.
  */
-static void run_inference(const uint8_t *rgb, int w, int h,
+static void parse_yolov5_head(const float *data, int head_idx,
+                               float *best_conf,
+                               float *best_x, float *best_y,
+                               float *best_w, float *best_h)
+{
+    int grid_h = GRID_SIZES[head_idx];
+    int grid_w = GRID_SIZES[head_idx];
+    int stride = STRIDES[head_idx];
+
+    for (int a = 0; a < NUM_ANCHORS; a++) {
+        float anchor_w = ANCHORS[head_idx][a][0];
+        float anchor_h = ANCHORS[head_idx][a][1];
+
+        for (int row = 0; row < grid_h; row++) {
+            for (int col = 0; col < grid_w; col++) {
+                int offset = ((a * grid_h + row) * grid_w + col) * NUM_ATTRS;
+
+                float obj = sigmoid(data[offset + 4]);
+                if (obj < 0.25f)
+                    continue;  /* skip low-objectness early */
+
+                float person_score = sigmoid(data[offset + 5 + COCO_PERSON]);
+                float final_score = obj * person_score;
+
+                if (final_score > CONF_THRESHOLD && final_score > *best_conf) {
+                    /* Decode box coordinates */
+                    float bx = (sigmoid(data[offset + 0]) * 2.0f - 0.5f + col) * stride;
+                    float by = (sigmoid(data[offset + 1]) * 2.0f - 0.5f + row) * stride;
+                    float bw = powf(sigmoid(data[offset + 2]) * 2.0f, 2) * anchor_w;
+                    float bh = powf(sigmoid(data[offset + 3]) * 2.0f, 2) * anchor_h;
+
+                    *best_conf = final_score;
+                    *best_x = bx;
+                    *best_y = by;
+                    *best_w = bw;
+                    *best_h = bh;
+                }
+            }
+        }
+    }
+}
+
+/*
+ * Run YOLOv5s inference on an NCHW uint8 image.
+ * Parses 3 output heads for person detections.
+ */
+static void run_inference(const uint8_t *nchw, int w, int h,
                            baby_ai_status_t *result)
 {
-    if (!g_ai.model_loaded) return;
+    (void)w; (void)h;  /* always MODEL_INPUT_W x MODEL_INPUT_H */
 
-    vip_status_e status;
+    if (!g_ai.model_loaded || !g_ai.ctx) return;
 
-    /* Copy RGB data into input buffer */
-    void *in_ptr = vip_map_buffer(g_ai.input_buf);
-    if (!in_ptr) {
-        fprintf(stderr, "baby_ai: vip_map_buffer (input) failed\n");
-        return;
-    }
-    memcpy(in_ptr, rgb, (size_t)w * h * 3);
-    vip_unmap_buffer(g_ai.input_buf);
+    /* Feed input — awnn expects void* array of input buffers */
+    void *input_bufs[1] = { (void *)nchw };
+    awnn_set_input_buffers(g_ai.ctx, input_bufs);
 
-    /* Bind input/output and run network */
-    status = vip_set_input(g_ai.network, 0, g_ai.input_buf);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_set_input failed: %d\n", status);
-        return;
-    }
+    /* Run inference on NPU */
+    awnn_run(g_ai.ctx);
 
-    status = vip_set_output(g_ai.network, 0, g_ai.output_buf);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_set_output failed: %d\n", status);
+    /* Get dequantized float32 output buffers (3 heads) */
+    float **outputs = awnn_get_output_buffers(g_ai.ctx);
+    if (!outputs) {
+        fprintf(stderr, "baby_ai: awnn_get_output_buffers returned NULL\n");
         return;
     }
 
-    status = vip_run_network(g_ai.network);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_run_network failed: %d\n", status);
-        return;
-    }
-
-    status = vip_finish_network(g_ai.network);
-    if (status != VIP_SUCCESS) {
-        fprintf(stderr, "baby_ai: vip_finish_network failed: %d\n", status);
-        return;
-    }
-
-    /* Read output data */
-    void *out_ptr = vip_map_buffer(g_ai.output_buf);
-    if (!out_ptr) {
-        fprintf(stderr, "baby_ai: vip_map_buffer (output) failed\n");
-        return;
-    }
-
-    /*
-     * Parse YOLOv8 output for person detections.
-     *
-     * YOLOv8n output format (after Acuity/NBG export):
-     *   output[0]: [1, 84, 8400] — 8400 detection candidates
-     *     Each candidate: [x_center, y_center, width, height, class_scores[80]]
-     *
-     * We only care about class 0 (person) with high confidence.
-     * The baby is detected as a "person" — we use bbox size relative to
-     * frame to distinguish baby (small person in back seat) from adults.
-     */
-    float *out_data = (float *)out_ptr;
-    int num_candidates = 8400;
-    int num_classes = 80;
-    int stride = 4 + num_classes; /* x, y, w, h, class_scores */
-
+    /* Parse all 3 YOLOv5 heads for best person detection */
     float best_conf = 0.0f;
     float best_x = 0, best_y = 0, best_w = 0, best_h = 0;
 
-    for (int i = 0; i < num_candidates; i++) {
-        float *det = out_data + i * stride;
-        float person_score = det[4 + COCO_PERSON];
-
-        if (person_score > CONF_THRESHOLD && person_score > best_conf) {
-            best_conf = person_score;
-            best_x = det[0];
-            best_y = det[1];
-            best_w = det[2];
-            best_h = det[3];
+    for (int i = 0; i < NUM_HEADS; i++) {
+        if (outputs[i]) {
+            parse_yolov5_head(outputs[i], i,
+                              &best_conf, &best_x, &best_y, &best_w, &best_h);
         }
     }
-
-    vip_unmap_buffer(g_ai.output_buf);
 
     /* Update result */
     if (best_conf > CONF_THRESHOLD) {
         result->confidence = best_conf;
-        /* Convert from model coords (0-640) to frame coords */
+        /* Convert from model coords (0-640) to bounding box */
         result->bbox_x = (int)(best_x - best_w / 2);
         result->bbox_y = (int)(best_y - best_h / 2);
         result->bbox_w = (int)best_w;
@@ -385,14 +321,14 @@ static void run_inference(const uint8_t *rgb, int w, int h,
 static int load_model(const char *path)
 {
     (void)path;
-    printf("baby_ai: STUB mode — no VIPLite runtime, AI features disabled\n");
+    printf("baby_ai: STUB mode — no awnn/VIPLite runtime, AI features disabled\n");
     return -1;
 }
 
-static void run_inference(const uint8_t *rgb, int w, int h,
+static void run_inference(const uint8_t *nchw, int w, int h,
                            baby_ai_status_t *result)
 {
-    (void)rgb; (void)w; (void)h; (void)result;
+    (void)nchw; (void)w; (void)h; (void)result;
 }
 
 #endif /* BABY_AI_STUB */
@@ -426,9 +362,9 @@ static void *inference_thread(void *arg)
         if (y_copy)
             memcpy(y_copy, g_ai.frame_buf, y_size);
 
-        /* Convert NV12 to RGB and resize for model */
-        nv12_to_rgb_resize(g_ai.frame_buf, w, h,
-                           g_ai.rgb_buf, MODEL_INPUT_W, MODEL_INPUT_H);
+        /* Convert NV12 to NCHW RGB and resize for model */
+        nv12_to_nchw_resize(g_ai.frame_buf, w, h,
+                            g_ai.nchw_buf, MODEL_INPUT_W, MODEL_INPUT_H);
         g_ai.frame_ready = false;
         pthread_mutex_unlock(&g_ai.frame_lock);
 
@@ -447,7 +383,7 @@ static void *inference_thread(void *arg)
         memset(&result, 0, sizeof(result));
         result.motion_level = motion;
 
-        run_inference(g_ai.rgb_buf, MODEL_INPUT_W, MODEL_INPUT_H, &result);
+        run_inference(g_ai.nchw_buf, MODEL_INPUT_W, MODEL_INPUT_H, &result);
         result.last_update_ns = monotonic_ns();
 
         /* Publish result */
@@ -480,15 +416,15 @@ int baby_ai_init(const char *model_path)
         return -1;
     }
 
-    /* Allocate RGB buffer for model input */
-    g_ai.rgb_buf = malloc(MODEL_INPUT_W * MODEL_INPUT_H * MODEL_INPUT_CH);
-    if (!g_ai.rgb_buf) {
-        fprintf(stderr, "baby_ai: RGB buffer alloc failed\n");
+    /* Allocate NCHW buffer for model input (3 planes of 640x640) */
+    g_ai.nchw_buf = malloc(MODEL_INPUT_W * MODEL_INPUT_H * MODEL_INPUT_CH);
+    if (!g_ai.nchw_buf) {
+        fprintf(stderr, "baby_ai: NCHW buffer alloc failed\n");
         free(g_ai.frame_buf);
         return -1;
     }
 
-    /* Load NBG model for VIP9000 NPU */
+    /* Load NBG model via awnn */
     const char *path = model_path ? model_path : DEFAULT_MODEL_PATH;
     if (load_model(path) < 0) {
         printf("baby_ai: model not loaded — motion detection only\n");
@@ -560,19 +496,16 @@ void baby_ai_destroy(void)
     pthread_join(g_ai.thread, NULL);
 
 #ifndef BABY_AI_STUB
-    if (g_ai.model_loaded) {
-        vip_destroy_buffer(g_ai.input_buf);
-        vip_destroy_buffer(g_ai.output_buf);
-        vip_destroy_network(g_ai.network);
-        g_ai.model_loaded = false;
+    if (g_ai.ctx) {
+        awnn_destroy(g_ai.ctx);
+        g_ai.ctx = NULL;
     }
-    free(g_ai.nbg_data);
-    g_ai.nbg_data = NULL;
-    vip_destroy();
+    awnn_uninit();
 #endif
+    g_ai.model_loaded = false;
 
     free(g_ai.frame_buf);
-    free(g_ai.rgb_buf);
+    free(g_ai.nchw_buf);
     free(g_ai.prev_y);
 
     pthread_mutex_destroy(&g_ai.frame_lock);

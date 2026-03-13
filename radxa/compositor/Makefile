@@ -11,14 +11,10 @@ FFMPEG_LIBS   := $(shell pkg-config --libs libavcodec libavutil libswscale 2>/de
 CFLAGS += $(FFMPEG_CFLAGS)
 
 # NPU: VeriSilicon VIP9000 on Allwinner A733
-# v2.0 (A733): libVIPhal.so + libNBGlinker.so
-# v1.13 (older): libVIPlite.so + libVIPuser.so
-ifneq ($(wildcard /usr/lib/libVIPhal.so /usr/lib/aarch64-linux-gnu/libVIPhal.so),)
-CFLAGS += -I/usr/include/VIPLite
-LDFLAGS = -ldrm -lpthread -lm -lVIPhal -lNBGlinker $(FFMPEG_LIBS)
-else ifneq ($(wildcard /usr/lib/libVIPlite.so /usr/lib/aarch64-linux-gnu/libVIPlite.so),)
-CFLAGS += -I/usr/include/VIPLite
-LDFLAGS = -ldrm -lpthread -lm -lVIPlite -lVIPuser $(FFMPEG_LIBS)
+# baby_ai.c uses the awnn wrapper library (libawnn.so) which wraps VIPLite.
+# awnn is built from ai-sdk during setup.sh alongside VIPLite SDK.
+ifneq ($(wildcard /usr/lib/libawnn.so),)
+LDFLAGS = -ldrm -lpthread -lm -lawnn $(FFMPEG_LIBS)
 else
 CFLAGS += -DBABY_AI_STUB
 LDFLAGS = -ldrm -lpthread -lm $(FFMPEG_LIBS)

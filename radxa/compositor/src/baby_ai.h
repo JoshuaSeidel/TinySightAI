@@ -2,9 +2,10 @@
 /*
  * baby_ai.h — AI Baby Monitoring via Allwinner A733 NPU
  *
- * Runs lightweight neural network inference on camera frames using the
- * VeriSilicon VIP9000 NPU (3 TOPS @ INT8 on Allwinner A733). Detections
- * run at ~1 fps in a dedicated thread, leaving the video pipeline undisturbed.
+ * Uses the awnn wrapper library (over VIPLite) to run YOLOv5s object detection
+ * on camera frames via the VIP9000 NPU (3 TOPS @ INT8 on Allwinner A733).
+ * Detections run at ~1 fps in a dedicated thread, leaving the video pipeline
+ * undisturbed.
  *
  * Detections:
  *   - Baby present / not present (object detection)
@@ -12,10 +13,8 @@
  *   - Face covered / obstructed
  *   - Excessive motion / distress (frame differencing)
  *
- * Model: YOLOv8n INT8 NBG (~6MB, ~20ms inference on VIP9000 NPU)
- *   Converted via: VeriSilicon Acuity Toolkit (on x86 host)
- *     1. Export YOLOv8n to ONNX: yolo export model=yolov8n.pt format=onnx
- *     2. Convert ONNX → NBG: acuitylite quantize + export (INT8 asymmetric)
+ * Model: YOLOv5s INT8 NBG from ZIFENG278/ai-sdk (pre-converted for VIP9000)
+ *   Installed by setup.sh from: ai-sdk/examples/yolov5/model/v2/yolov5.nb
  *   Expected at: /opt/aadongle/models/baby_detect.nb
  *
  * Alert flow:
