@@ -627,9 +627,10 @@ step "Deploying via rsync..."
 cleanup_mounts
 
 # rsync the new rootfs over the live system
-# --delete removes files not in newroot, --ignore-errors skips busy mountpoints
+# NO --delete: rmdir on mount points hangs the kernel. Stale files are harmless;
+# the new rootfs has everything needed and we sysrq-reboot immediately after.
 # Exclude: virtual filesystems, build area, boot partition, build tools, swap
-"$NEWROOT/usr/bin/rsync" -aAX --delete --ignore-errors "$NEWROOT/" / \
+"$NEWROOT/usr/bin/rsync" -aAX "$NEWROOT/" / \
     --exclude=/proc \
     --exclude=/sys \
     --exclude=/dev \
@@ -643,10 +644,9 @@ cleanup_mounts
     --exclude=/root/.cargo \
     --exclude=/root/.rustup \
     2>&1
-# rsync returns non-zero for delete errors on busy dirs — that's OK
-RSYNC_RC=$?
-if [ $RSYNC_RC -ne 0 ] && [ $RSYNC_RC -ne 24 ]; then
-    warn "rsync exited with code $RSYNC_RC (non-fatal delete errors expected on live system)"
+if [ $? -ne 0 ]; then
+    fail "rsync failed — new rootfs was NOT deployed"
+    exit 1
 fi
 
 ok "rsync complete"
