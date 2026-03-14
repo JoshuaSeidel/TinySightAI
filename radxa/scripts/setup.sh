@@ -68,6 +68,8 @@ record_warn() { SUMMARY_WARN+=("$*"); }
 # =============================================================================
 # STEP 0 — Fix broken dpkg state (before ANY apt operation)
 # =============================================================================
+step "[0/10] Fixing broken dpkg/apt state..."
+
 # radxa-sddm-theme has a broken postrm that blocks every apt call.
 # Replace the script with a no-op and purge it.
 _sddm_postrm="/var/lib/dpkg/info/radxa-sddm-theme.postrm"
@@ -76,6 +78,22 @@ if [ -f "$_sddm_postrm" ]; then
     dpkg --purge --force-all radxa-sddm-theme 2>/dev/null || true
     ok "Purged broken radxa-sddm-theme package"
 fi
+
+# task-allwinner-xorg depends on radxa-sddm-theme and poisons apt if present.
+# Remove it and any other Radxa desktop meta-packages.
+for broken_meta in task-allwinner-xorg task-allwinner-desktop; do
+    if dpkg -l "$broken_meta" 2>/dev/null | grep -q "^[a-z]i"; then
+        _postrm="/var/lib/dpkg/info/${broken_meta}.postrm"
+        [ -f "$_postrm" ] && printf '#!/bin/sh\nexit 0\n' > "$_postrm"
+        dpkg --purge --force-all "$broken_meta" 2>/dev/null || true
+        ok "Purged broken meta-package: $broken_meta"
+    fi
+done
+
+# Fix any remaining broken dependencies
+apt-get -f install -y 2>/dev/null || true
+dpkg --configure -a 2>/dev/null || true
+ok "dpkg/apt state cleaned"
 
 # =============================================================================
 # STEP 1 — System packages
