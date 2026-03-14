@@ -66,6 +66,18 @@ record_ok()   { SUMMARY_OK+=("$*"); }
 record_warn() { SUMMARY_WARN+=("$*"); }
 
 # =============================================================================
+# STEP 0 — Fix broken dpkg state (before ANY apt operation)
+# =============================================================================
+# radxa-sddm-theme has a broken postrm that blocks every apt call.
+# Replace the script with a no-op and purge it.
+_sddm_postrm="/var/lib/dpkg/info/radxa-sddm-theme.postrm"
+if [ -f "$_sddm_postrm" ]; then
+    printf '#!/bin/sh\nexit 0\n' > "$_sddm_postrm"
+    dpkg --purge --force-all radxa-sddm-theme 2>/dev/null || true
+    ok "Purged broken radxa-sddm-theme package"
+fi
+
+# =============================================================================
 # STEP 1 — System packages
 # =============================================================================
 step "[1/10] Updating apt package index..."
