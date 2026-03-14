@@ -109,7 +109,7 @@ step "[1/11] Creating minimal Debian base via debootstrap..."
 [ -d "$NEWROOT" ] && rm -rf "$NEWROOT"
 mkdir -p "$NEWROOT"
 
-debootstrap --variant=minbase \
+debootstrap --variant=minbase --no-merged-usr \
     --include=systemd,systemd-sysv,dbus,udev,kmod,initramfs-tools,apt,gpg,ca-certificates \
     "$DEBIAN_SUITE" "$NEWROOT" "$DEBIAN_MIRROR"
 
