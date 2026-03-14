@@ -24,11 +24,11 @@
 #   5. Creates radxa user, copies SSH keys + WiFi profiles
 #   6. Applies read-only root + overlayfs hardening
 #   7. Verifies critical binaries, packs tarball to /boot
-#   8. Installs initramfs deploy script — reboot deploys automatically
+#   8. Installs systemd deploy service — reboot deploys automatically
 #
 # Safe deployment:
 #   - Live system is NEVER modified during build
-#   - Deploy happens in initramfs before root is mounted
+#   - On reboot, a systemd service extracts the tarball over root
 #   - If deploy fails: auto-retries on next boot (tarball stays on /boot)
 #   - Recovery: mount SD on PC, run /boot/recover.sh /dev/sdX3
 # =============================================================================
@@ -103,7 +103,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 1: Debootstrap minimal base
 # ---------------------------------------------------------------------------
-step "[1/9] Creating minimal Debian base via debootstrap..."
+step "[1/11] Creating minimal Debian base via debootstrap..."
 
 # Clean any previous attempt
 [ -d "$NEWROOT" ] && rm -rf "$NEWROOT"
@@ -118,7 +118,7 @@ ok "Base system created ($(du -sh "$NEWROOT" | cut -f1))"
 # ---------------------------------------------------------------------------
 # Step 2: Add Radxa apt repository
 # ---------------------------------------------------------------------------
-step "[2/9] Adding Radxa apt repository for vendor packages..."
+step "[2/11] Adding Radxa apt repository for vendor packages..."
 
 # Mount /proc /sys /dev for chroot operations
 mount --bind /proc "$NEWROOT/proc"
@@ -174,7 +174,7 @@ ok "Radxa apt repo configured"
 # ---------------------------------------------------------------------------
 # Step 3: Install runtime packages
 # ---------------------------------------------------------------------------
-step "[3/9] Installing runtime packages (only what we need)..."
+step "[3/11] Installing runtime packages (only what we need)..."
 
 # Prevent services from auto-starting during package installation in chroot
 mkdir -p "$NEWROOT/usr/sbin"
@@ -259,7 +259,7 @@ ok "Package cache cleaned"
 # ---------------------------------------------------------------------------
 # Step 4: Copy vendor kernel modules + firmware
 # ---------------------------------------------------------------------------
-step "[4/9] Copying kernel modules and firmware from running system..."
+step "[4/11] Copying kernel modules and firmware from running system..."
 
 # Kernel modules
 mkdir -p "$NEWROOT/lib/modules"
@@ -274,7 +274,7 @@ ok "Firmware blobs copied"
 # ---------------------------------------------------------------------------
 # Step 5: Install our binaries and scripts
 # ---------------------------------------------------------------------------
-step "[5/9] Installing AADongle binaries and scripts..."
+step "[5/11] Installing AADongle binaries and scripts..."
 
 # Create directory tree
 mkdir -p "$NEWROOT/opt/aadongle/"{bin,scripts,baby-monitor,ota-server,web,firmware,config,models}
@@ -327,7 +327,7 @@ ok "All AADongle files installed"
 # ---------------------------------------------------------------------------
 # Step 6: System configuration
 # ---------------------------------------------------------------------------
-step "[6/9] Configuring system..."
+step "[6/11] Configuring system..."
 
 # Hostname
 echo "aadongle" > "$NEWROOT/etc/hostname"
@@ -521,7 +521,7 @@ ok "System configured"
 # ---------------------------------------------------------------------------
 # Step 7: Systemd services
 # ---------------------------------------------------------------------------
-step "[7/9] Installing systemd services..."
+step "[7/11] Installing systemd services..."
 
 SYSTEMD_DIR="$NEWROOT/etc/systemd/system"
 mkdir -p "$SYSTEMD_DIR"
@@ -576,7 +576,7 @@ ok "Services installed and enabled"
 # ---------------------------------------------------------------------------
 # Step 8: Read-only root + overlayfs
 # ---------------------------------------------------------------------------
-step "[8/9] Setting up read-only root with overlayfs..."
+step "[8/11] Setting up read-only root with overlayfs..."
 
 # Install initramfs overlay scripts into new rootfs
 # NOTE: The initramfs must be rebuilt AFTER deploy (on the live system),
@@ -694,32 +694,24 @@ TARBALL_SIZE=$(du -h /boot/rootfs-pending.tar.gz | cut -f1)
 ok "Tarball created: /boot/rootfs-pending.tar.gz ($TARBALL_SIZE)"
 
 # ---------------------------------------------------------------------------
-# Step 11: Install initramfs deploy scripts
+# Step 11: Install deploy service on LIVE system
 # ---------------------------------------------------------------------------
-step "[11/11] Installing initramfs deploy scripts..."
+step "[11/11] Installing deploy service..."
 
-# Install deploy scripts into LIVE system's initramfs directories
-mkdir -p /etc/initramfs-tools/scripts/local-premount
-mkdir -p /etc/initramfs-tools/hooks
+# Install deploy script and systemd service on the LIVE system
+# This runs on next boot: extracts tarball over root, then reboots
+cp "$CONFIG_DIR/deploy/deploy-rootfs.sh" /usr/local/sbin/deploy-rootfs.sh
+chmod 755 /usr/local/sbin/deploy-rootfs.sh
 
-cp "$CONFIG_DIR/deploy/deploy-rootfs" \
-   /etc/initramfs-tools/scripts/local-premount/deploy-rootfs
-chmod 755 /etc/initramfs-tools/scripts/local-premount/deploy-rootfs
-
-cp "$CONFIG_DIR/deploy/deploy-hook" \
-   /etc/initramfs-tools/hooks/deploy-rootfs
-chmod 755 /etc/initramfs-tools/hooks/deploy-rootfs
-ok "Deploy scripts installed into initramfs"
+cp "$CONFIG_DIR/deploy/deploy-rootfs.service" /etc/systemd/system/deploy-rootfs.service
+systemctl daemon-reload
+systemctl enable deploy-rootfs.service
+ok "Deploy service installed and enabled"
 
 # Copy recovery script to /boot
 cp "$CONFIG_DIR/deploy/recover.sh" /boot/recover.sh
 chmod 755 /boot/recover.sh
 ok "Recovery script copied to /boot/recover.sh"
-
-# Rebuild initramfs on the LIVE system to include deploy scripts
-echo "  Rebuilding initramfs (this includes mke2fs for deployment)..."
-update-initramfs -u 2>&1 | tail -2
-ok "Initramfs rebuilt with deploy scripts"
 
 echo ""
 echo -e "${GRN}================================================================${RST}"
@@ -727,7 +719,8 @@ echo -e "${GRN}  Rootfs built, verified, and staged on /boot.${RST}"
 echo -e "${GRN}  Live system is UNTOUCHED.${RST}"
 echo ""
 echo -e "  To deploy: ${CYN}sudo reboot${RST}"
-echo -e "  The new rootfs deploys automatically during boot."
+echo -e "  The deploy service extracts the tarball on next boot,"
+echo -e "  then reboots into the new rootfs automatically."
 echo ""
 echo -e "  If boot fails, mount SD card on a PC and run:"
 echo -e "    ${CYN}sudo bash /boot/recover.sh /dev/sdX3${RST}"

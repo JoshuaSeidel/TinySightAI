@@ -1,0 +1,16 @@
+[Unit]
+Description=Deploy staged rootfs from /boot
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+RequiresMountsFor=/boot
+ConditionPathExists=/boot/rootfs-pending.tar.gz
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/deploy-rootfs.sh
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=sysinit.target
