@@ -138,13 +138,27 @@ else
             record_ok "VIPLite NPU runtime"
 
             # Build and install libawnn (VIPLite convenience wrapper)
+            # awnn source uses Android log macros (ALOGD/ALOGE/ALOGW) — provide stub
             AWNN_DIR="$NPU_SDK_DIR/examples/libawnn_viplite"
             if [ -d "$AWNN_DIR" ]; then
                 echo "  Building libawnn.so..."
+                mkdir -p /tmp/awnn-build/log
+                cat > /tmp/awnn-build/log/log.h << 'LOGHDR'
+/* Stub for Android log/log.h — map ALOG* to fprintf(stderr) */
+#ifndef _STUB_LOG_LOG_H
+#define _STUB_LOG_LOG_H
+#include <stdio.h>
+#define ALOGD(fmt, ...) fprintf(stderr, "awnn: " fmt, ##__VA_ARGS__)
+#define ALOGW(fmt, ...) fprintf(stderr, "awnn WARN: " fmt, ##__VA_ARGS__)
+#define ALOGE(fmt, ...) fprintf(stderr, "awnn ERROR: " fmt, ##__VA_ARGS__)
+#endif
+LOGHDR
                 gcc -shared -fPIC -O2 -o /usr/lib/libawnn.so \
                     "$AWNN_DIR"/awnn_lib.c "$AWNN_DIR"/awnn_quantize.c \
-                    -I/usr/include/VIPLite -lVIPhal -lNBGlinker -lpthread 2>&1
+                    -I/tmp/awnn-build -I/usr/include/VIPLite \
+                    -lVIPhal -lNBGlinker -lpthread 2>&1
                 cp "$AWNN_DIR"/awnn_lib.h /usr/include/
+                rm -rf /tmp/awnn-build
                 ldconfig
                 ok "libawnn.so built and installed"
             else
@@ -162,14 +176,27 @@ else
                 ok "VIPLite NPU SDK installed (v1.13 fallback)"
                 record_ok "VIPLite NPU runtime (v1.13)"
 
-                # Build awnn against v1.13
+                # Build awnn against v1.13 (reuse stub header from /tmp if present)
                 AWNN_DIR="$NPU_SDK_DIR/examples/libawnn_viplite"
                 if [ -d "$AWNN_DIR" ]; then
                     echo "  Building libawnn.so (v1.13)..."
+                    mkdir -p /tmp/awnn-build/log
+                    cat > /tmp/awnn-build/log/log.h << 'LOGHDR'
+/* Stub for Android log/log.h */
+#ifndef _STUB_LOG_LOG_H
+#define _STUB_LOG_LOG_H
+#include <stdio.h>
+#define ALOGD(fmt, ...) fprintf(stderr, "awnn: " fmt, ##__VA_ARGS__)
+#define ALOGW(fmt, ...) fprintf(stderr, "awnn WARN: " fmt, ##__VA_ARGS__)
+#define ALOGE(fmt, ...) fprintf(stderr, "awnn ERROR: " fmt, ##__VA_ARGS__)
+#endif
+LOGHDR
                     gcc -shared -fPIC -O2 -o /usr/lib/libawnn.so \
                         "$AWNN_DIR"/awnn_lib.c "$AWNN_DIR"/awnn_quantize.c \
-                        -I/usr/include/VIPLite -lVIPlite -lVIPuser -lpthread 2>&1
+                        -I/tmp/awnn-build -I/usr/include/VIPLite \
+                        -lVIPlite -lVIPuser -lpthread 2>&1
                     cp "$AWNN_DIR"/awnn_lib.h /usr/include/
+                    rm -rf /tmp/awnn-build
                     ldconfig
                     ok "libawnn.so built and installed (v1.13)"
                 fi
