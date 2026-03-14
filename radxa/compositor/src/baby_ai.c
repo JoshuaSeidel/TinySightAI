@@ -31,7 +31,7 @@
 /* awnn library — conditionally included.
  * If building without awnn/VIPLite, define BABY_AI_STUB for no-op stub. */
 #ifndef BABY_AI_STUB
-#include <awnn_lib.h>
+#include "awnn_lib.h"
 #endif
 
 #define DEFAULT_MODEL_PATH "/opt/aadongle/models/baby_detect.nb"

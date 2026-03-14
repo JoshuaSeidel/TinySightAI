@@ -1,0 +1,72 @@
+/*
+ * awnn_internal.h — Internal structures for awnn VIPLite wrapper
+ *
+ * Vendored from ZIFENG278/ai-sdk (examples/libawnn_viplite/)
+ * Modified: replaced Android <log/log.h> with fprintf-based logging
+ */
+
+#ifndef _AWNN_INTERNAL_H_
+#define _AWNN_INTERNAL_H_
+
+#include <stdio.h>
+#include <vip_lite.h>
+#include <sys/time.h>
+#include <pthread.h>
+
+/* Logging — replaces Android ALOG* macros from <log/log.h> */
+#define ALOGD(fmt, ...) fprintf(stderr, "awnn: " fmt, ##__VA_ARGS__)
+#define ALOGW(fmt, ...) fprintf(stderr, "awnn WARN: " fmt, ##__VA_ARGS__)
+#define ALOGE(fmt, ...) fprintf(stderr, "awnn ERROR: " fmt, ##__VA_ARGS__)
+
+typedef struct Awnn_params {
+    vip_buffer_create_params_t vip_param;
+    /* awnn addition param */
+    vip_char_t   name[256];
+    vip_uint32_t elements;
+} Awnn_params_t;
+
+typedef struct Awnn_Context {
+    pthread_mutex_t mutex;
+    /* VIP lite buffer objects. */
+    vip_network     network;
+    vip_uint32_t    input_count;
+    vip_uint32_t    output_count;
+    vip_buffer     *input_buffers;
+    vip_buffer     *output_buffers;
+    Awnn_params_t  *input_params;
+    Awnn_params_t  *output_params;
+    vip_float_t   **quantize_maps;
+    void          **user_input_buffers;
+    float         **user_output_buffers;
+} Awnn_Context_t;
+
+#define _CHECK_STATUS(stat, lbl) do { \
+    if (VIP_SUCCESS != stat) { \
+        ALOGD("Error: %s, %s at %d\n", __FILE__, __FUNCTION__, __LINE__); \
+        goto lbl; \
+    } \
+} while(0)
+
+#define TIME_SLOTS 10
+static vip_uint64_t time_begin[TIME_SLOTS];
+static vip_uint64_t time_end[TIME_SLOTS];
+
+static inline vip_uint64_t GetTime(void)
+{
+    struct timeval time;
+    gettimeofday(&time, NULL);
+    return (vip_uint64_t)(time.tv_usec + time.tv_sec * 1000000LL);
+}
+
+#define TimeBegin(id) \
+do { \
+    time_begin[id] = GetTime(); \
+} while (0)
+
+#define TimeEnd(id, PREFIX, ...) \
+do { \
+    time_end[id] = GetTime(); \
+    ALOGD(PREFIX"%.2f ms.\n", ##__VA_ARGS__, (float)(time_end[id] - time_begin[id]) / 1000); \
+} while (0)
+
+#endif /* _AWNN_INTERNAL_H_ */

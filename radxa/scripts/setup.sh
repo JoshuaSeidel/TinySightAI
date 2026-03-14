@@ -112,13 +112,13 @@ apt-get install -y \
 ok "All system packages installed"
 record_ok "System packages"
 
-# Install VeriSilicon VIPLite NPU SDK + awnn wrapper + YOLOv5s model
+# Install VeriSilicon VIPLite NPU SDK + YOLOv5s model
 # No apt packages exist — must clone and install from source.
 # A733 uses NPU v2.0: libraries are libVIPhal.so + libNBGlinker.so
-# awnn is a convenience wrapper from the same repo (handles multi-output, dequant)
+# awnn wrapper is vendored into compositor source (no separate .so needed)
 NPU_SDK_DIR="/tmp/ai-sdk"
-if [ -f /usr/lib/libVIPhal.so ] && [ -f /usr/lib/libNBGlinker.so ] && [ -f /usr/lib/libawnn.so ]; then
-    ok "VIPLite NPU runtime + awnn already installed"
+if [ -f /usr/lib/libVIPhal.so ] && [ -f /usr/lib/libNBGlinker.so ]; then
+    ok "VIPLite NPU runtime already installed"
     record_ok "VIPLite NPU runtime"
 else
     echo "  Installing VIPLite NPU SDK from source..."
@@ -127,43 +127,13 @@ else
         # Install VIPLite v2.0 libraries and headers for A733
         SDK_LIB="$NPU_SDK_DIR/viplite-tina/lib/aarch64-none-linux-gnu/v2.0"
         if [ -d "$SDK_LIB" ]; then
-            # Copy VIPLite libraries
             cp -a "$SDK_LIB"/lib*.so* /usr/lib/ 2>/dev/null || true
-            # Copy VIPLite headers
             mkdir -p /usr/include/VIPLite
             cp -a "$SDK_LIB"/inc/*.h /usr/include/VIPLite/ 2>/dev/null || true
             cp -a "$SDK_LIB"/inc/*.h /usr/include/ 2>/dev/null || true
             ldconfig
             ok "VIPLite NPU SDK installed (v2.0 for A733)"
             record_ok "VIPLite NPU runtime"
-
-            # Build and install libawnn (VIPLite convenience wrapper)
-            # awnn source uses Android log macros (ALOGD/ALOGE/ALOGW) — provide stub
-            AWNN_DIR="$NPU_SDK_DIR/examples/libawnn_viplite"
-            if [ -d "$AWNN_DIR" ]; then
-                echo "  Building libawnn.so..."
-                mkdir -p /tmp/awnn-build/log
-                cat > /tmp/awnn-build/log/log.h << 'LOGHDR'
-/* Stub for Android log/log.h — map ALOG* to fprintf(stderr) */
-#ifndef _STUB_LOG_LOG_H
-#define _STUB_LOG_LOG_H
-#include <stdio.h>
-#define ALOGD(fmt, ...) fprintf(stderr, "awnn: " fmt, ##__VA_ARGS__)
-#define ALOGW(fmt, ...) fprintf(stderr, "awnn WARN: " fmt, ##__VA_ARGS__)
-#define ALOGE(fmt, ...) fprintf(stderr, "awnn ERROR: " fmt, ##__VA_ARGS__)
-#endif
-LOGHDR
-                gcc -shared -fPIC -O2 -o /usr/lib/libawnn.so \
-                    "$AWNN_DIR"/awnn_lib.c "$AWNN_DIR"/awnn_quantize.c \
-                    -I/tmp/awnn-build -I/usr/include/VIPLite \
-                    -lVIPhal -lNBGlinker -lpthread 2>&1
-                cp "$AWNN_DIR"/awnn_lib.h /usr/include/
-                rm -rf /tmp/awnn-build
-                ldconfig
-                ok "libawnn.so built and installed"
-            else
-                warn "awnn source not found in ai-sdk"
-            fi
         else
             warn "VIPLite v2.0 libraries not found in ai-sdk — trying v1.13 fallback"
             SDK_LIB_OLD="$NPU_SDK_DIR/viplite-tina/lib/aarch64-none-linux-gnu/v1.13"
@@ -175,31 +145,6 @@ LOGHDR
                 ldconfig
                 ok "VIPLite NPU SDK installed (v1.13 fallback)"
                 record_ok "VIPLite NPU runtime (v1.13)"
-
-                # Build awnn against v1.13 (reuse stub header from /tmp if present)
-                AWNN_DIR="$NPU_SDK_DIR/examples/libawnn_viplite"
-                if [ -d "$AWNN_DIR" ]; then
-                    echo "  Building libawnn.so (v1.13)..."
-                    mkdir -p /tmp/awnn-build/log
-                    cat > /tmp/awnn-build/log/log.h << 'LOGHDR'
-/* Stub for Android log/log.h */
-#ifndef _STUB_LOG_LOG_H
-#define _STUB_LOG_LOG_H
-#include <stdio.h>
-#define ALOGD(fmt, ...) fprintf(stderr, "awnn: " fmt, ##__VA_ARGS__)
-#define ALOGW(fmt, ...) fprintf(stderr, "awnn WARN: " fmt, ##__VA_ARGS__)
-#define ALOGE(fmt, ...) fprintf(stderr, "awnn ERROR: " fmt, ##__VA_ARGS__)
-#endif
-LOGHDR
-                    gcc -shared -fPIC -O2 -o /usr/lib/libawnn.so \
-                        "$AWNN_DIR"/awnn_lib.c "$AWNN_DIR"/awnn_quantize.c \
-                        -I/tmp/awnn-build -I/usr/include/VIPLite \
-                        -lVIPlite -lVIPuser -lpthread 2>&1
-                    cp "$AWNN_DIR"/awnn_lib.h /usr/include/
-                    rm -rf /tmp/awnn-build
-                    ldconfig
-                    ok "libawnn.so built and installed (v1.13)"
-                fi
             else
                 warn "No VIPLite libraries found in ai-sdk"
                 record_warn "VIPLite NPU runtime: SDK clone OK but no libs found"
