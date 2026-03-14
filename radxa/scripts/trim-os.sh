@@ -58,8 +58,18 @@ done
 #    avahi-daemon intentionally absent from purge list.
 # =============================================================================
 step "[2/5] Removing desktop packages (if any)..."
+
+# Force-remove packages with broken postrm scripts first
+for broken_pkg in radxa-sddm-theme; do
+    if dpkg -l "$broken_pkg" 2>/dev/null | grep -q "^ii"; then
+        dpkg --remove --force-remove-reinstreq "$broken_pkg" 2>/dev/null || \
+        dpkg --purge --force-all "$broken_pkg" 2>/dev/null || true
+        ok "Force-removed broken package: $broken_pkg"
+    fi
+done
+
 apt-get remove --purge -y \
-    xserver-xorg* lightdm* lxde* lxqt* \
+    xserver-xorg* lightdm* lxde* lxqt* sddm* \
     chromium* firefox* \
     libreoffice* \
     pulseaudio* pipewire* \
@@ -127,8 +137,8 @@ MASK_BOOT=(
     fstrim.timer
     logrotate.timer
     systemd-journal-flush.service
-    emergency.service
-    rescue.service
+    # NOTE: emergency.service and rescue.service intentionally NOT masked —
+    # they provide a recovery shell if boot fails.
 )
 
 for svc in "${MASK_BOOT[@]}"; do
