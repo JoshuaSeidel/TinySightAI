@@ -61,9 +61,11 @@ step "[2/5] Removing desktop packages (if any)..."
 
 # Force-remove packages with broken postrm scripts first
 for broken_pkg in radxa-sddm-theme; do
-    if dpkg -l "$broken_pkg" 2>/dev/null | grep -q "^ii"; then
-        dpkg --remove --force-remove-reinstreq "$broken_pkg" 2>/dev/null || \
-        dpkg --purge --force-all "$broken_pkg" 2>/dev/null || true
+    if dpkg -l "$broken_pkg" 2>/dev/null | grep -q "^[ih]i"; then
+        # Replace broken postrm with no-op so dpkg --remove succeeds
+        postrm="/var/lib/dpkg/info/${broken_pkg}.postrm"
+        [ -f "$postrm" ] && printf '#!/bin/sh\nexit 0\n' > "$postrm"
+        dpkg --remove --force-remove-reinstreq "$broken_pkg" 2>/dev/null || true
         ok "Force-removed broken package: $broken_pkg"
     fi
 done
