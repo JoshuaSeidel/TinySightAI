@@ -89,7 +89,7 @@ apt-get install -y \
     `# Core system tools` \
     build-essential git curl wget \
     `# Networking / WiFi AP` \
-    hostapd dnsmasq \
+    hostapd dnsmasq iw \
     `# Bluetooth` \
     bluez \
     `# Camera / V4L2` \
@@ -118,8 +118,7 @@ apt-get install -y \
     `# Python (bt-agent, baby-monitor server, ota-server)` \
     python3 python3-dbus python3-gi gir1.2-glib-2.0 \
     `# Miscellaneous runtime helpers` \
-    net-tools iproute2 netcat-openbsd \
-    2>&1 | grep -E '(Setting up|already installed|E:)' || true
+    net-tools iproute2 netcat-openbsd
 
 ok "All system packages installed"
 record_ok "System packages"
@@ -294,7 +293,27 @@ Requires=ap0-setup.service
 After=ap0-setup.service
 DROP_EOF
     systemctl unmask hostapd 2>/dev/null || true
-    systemctl enable hostapd
+    # If the distro's hostapd package didn't ship a service unit, create one
+    if [ ! -f /lib/systemd/system/hostapd.service ] && \
+       [ ! -f /etc/systemd/system/hostapd.service ]; then
+        cat > /etc/systemd/system/hostapd.service <<'HOSTAPD_SVC'
+[Unit]
+Description=Advanced IEEE 802.11 AP and WPA/WPA2/WPA3 Authenticator
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/run/hostapd.pid
+EnvironmentFile=-/etc/default/hostapd
+ExecStart=/usr/sbin/hostapd -B -P /run/hostapd.pid ${DAEMON_CONF}
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target
+HOSTAPD_SVC
+        ok "Created hostapd.service (not provided by package)"
+    fi
+    systemctl enable hostapd 2>/dev/null || warn "Could not enable hostapd.service"
     systemctl stop hostapd 2>/dev/null || true
     ok "hostapd configured and enabled (will start after reboot with ap0)"
     record_ok "hostapd (hidden 5GHz AP)"
@@ -314,7 +333,7 @@ if [ -f "$CONFIG_DIR/dnsmasq.conf" ]; then
 Requires=ap0-setup.service
 After=ap0-setup.service
 DROP_EOF
-    systemctl enable dnsmasq
+    systemctl enable dnsmasq 2>/dev/null || warn "Could not enable dnsmasq.service"
     systemctl stop dnsmasq 2>/dev/null || true
     ok "dnsmasq configured and enabled (will start after reboot with ap0)"
     record_ok "dnsmasq (DHCP server)"
@@ -324,6 +343,7 @@ else
 fi
 
 # IP forwarding (needed if we ever NAT through to the car's network)
+mkdir -p /etc/sysctl.d
 if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.d/99-aadongle.conf 2>/dev/null; then
     echo "net.ipv4.ip_forward=1" >> /etc/sysctl.d/99-aadongle.conf
 fi
@@ -340,6 +360,7 @@ ok "NetworkManager + wpa_supplicant verified running (dev SSH preserved)"
 # =============================================================================
 step "[5b/10] Configuring Bluetooth..."
 if [ -f "$CONFIG_DIR/bluetooth.conf" ]; then
+    mkdir -p /etc/bluetooth
     install -m 644 "$CONFIG_DIR/bluetooth.conf" /etc/bluetooth/main.conf
     ok "bluetooth.conf installed"
     record_ok "Bluetooth config"
@@ -347,14 +368,14 @@ else
     warn "bluetooth.conf not found at $CONFIG_DIR/bluetooth.conf — skipping"
     record_warn "Bluetooth config missing"
 fi
-systemctl enable bluetooth
+systemctl enable bluetooth 2>/dev/null || warn "Could not enable bluetooth.service"
 ok "bluetooth.service enabled"
 
 # =============================================================================
 # STEP 6 — Avahi daemon (CarPlay mDNS / Bonjour)
 # =============================================================================
 step "[5c/10] Enabling avahi-daemon for CarPlay mDNS..."
-systemctl enable avahi-daemon
+systemctl enable avahi-daemon 2>/dev/null || warn "Could not enable avahi-daemon"
 systemctl start avahi-daemon 2>/dev/null || true
 ok "avahi-daemon enabled (required for CarPlay Bonjour advertisement)"
 record_ok "avahi-daemon (CarPlay mDNS)"

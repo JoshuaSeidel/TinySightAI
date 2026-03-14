@@ -11,4 +11,16 @@ case $1 in prereqs) prereqs; exit 0;; esac
 
 # mke2fs is needed to format the root partition before extracting the tarball.
 # copy_exec also pulls in all shared library dependencies automatically.
-copy_exec /sbin/mke2fs /sbin
+# Try both /sbin and /usr/sbin (merged-usr vs traditional layout)
+if [ -x /sbin/mke2fs ]; then
+    copy_exec /sbin/mke2fs /sbin
+elif [ -x /usr/sbin/mke2fs ]; then
+    copy_exec /usr/sbin/mke2fs /sbin
+fi
+
+# Ensure gzip is available for tarball decompression
+if [ -x /bin/gzip ]; then
+    copy_exec /bin/gzip /bin
+elif [ -x /usr/bin/gzip ]; then
+    copy_exec /usr/bin/gzip /bin
+fi

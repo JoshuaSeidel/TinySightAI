@@ -44,7 +44,8 @@ fi
 mkdir -p /rootfs_deploy
 mount -t ext4 "$ROOT" /rootfs_deploy
 
-tar xzf /boot_mnt/rootfs-pending.tar.gz -C /rootfs_deploy
+# Use pipe pattern for busybox compatibility (busybox tar may lack -z)
+gzip -dc /boot_mnt/rootfs-pending.tar.gz | tar xf - -C /rootfs_deploy
 TAR_RC=$?
 
 umount /rootfs_deploy

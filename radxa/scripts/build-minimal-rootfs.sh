@@ -150,6 +150,7 @@ $FOUND_KEY || warn "No Radxa GPG key found on host"
 # Copy Radxa repo config from host — search all sources files for "radxa"
 HOST_RADXA_SRC=$(grep -rl "radxa" /etc/apt/sources.list.d/ 2>/dev/null | head -1)
 if [ -n "$HOST_RADXA_SRC" ]; then
+    mkdir -p "$NEWROOT/etc/apt/sources.list.d"
     cp "$HOST_RADXA_SRC" "$NEWROOT/etc/apt/sources.list.d/"
     ok "Copied Radxa repo config from host ($HOST_RADXA_SRC)"
 else
@@ -190,7 +191,7 @@ chroot "$NEWROOT" apt-get install -y --no-install-recommends \
     `# WiFi STA management (dev SSH over wlan0) + AP virtual interface` \
     network-manager wpasupplicant iw \
     `# Network` \
-    hostapd dnsmasq-base iproute2 netcat-openbsd ifupdown \
+    hostapd dnsmasq iproute2 netcat-openbsd ifupdown \
     `# Bluetooth + mDNS` \
     bluez avahi-daemon \
     `# Camera / GPIO / I2C` \
@@ -479,6 +480,26 @@ ExecStop=/sbin/iw dev ap0 del
 WantedBy=multi-user.target
 UNIT_EOF
 
+# --- hostapd service unit (if not provided by the package) ---
+if [ ! -f "$NEWROOT/lib/systemd/system/hostapd.service" ] && \
+   [ ! -f "$NEWROOT/etc/systemd/system/hostapd.service" ]; then
+    cat > "$NEWROOT/etc/systemd/system/hostapd.service" <<'HOSTAPD_SVC'
+[Unit]
+Description=Advanced IEEE 802.11 AP and WPA/WPA2/WPA3 Authenticator
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/run/hostapd.pid
+EnvironmentFile=-/etc/default/hostapd
+ExecStart=/usr/sbin/hostapd -B -P /run/hostapd.pid ${DAEMON_CONF}
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target
+HOSTAPD_SVC
+fi
+
 # --- hostapd drop-in: wait for ap0 ---
 mkdir -p "$NEWROOT/etc/systemd/system/hostapd.service.d"
 cat > "$NEWROOT/etc/systemd/system/hostapd.service.d/wait-for-ap0.conf" <<'DROP_EOF'
@@ -606,9 +627,9 @@ echo "  Packages:       $(chroot "$NEWROOT" dpkg --list | grep '^ii' | wc -l)"
 echo ""
 
 VERIFY_FAIL=0
-for f in /usr/sbin/sshd /bin/systemd /sbin/init \
+for f in /usr/sbin/sshd /lib/systemd/systemd /sbin/init \
          /usr/sbin/NetworkManager /sbin/wpa_supplicant \
-         /usr/bin/hostapd /usr/sbin/dnsmasq; do
+         /usr/sbin/hostapd /usr/sbin/dnsmasq; do
     if [ -f "$NEWROOT$f" ]; then
         ok "Found: $f"
     else
