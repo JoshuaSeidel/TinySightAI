@@ -12,16 +12,39 @@ case $1 in prereqs) prereqs; exit 0;; esac
 
 . /scripts/functions
 
-# $ROOT is set by initramfs-tools (e.g. /dev/mmcblk0p3)
+# $ROOT is set by initramfs-tools — may be a device path OR UUID=... / LABEL=...
 [ -n "$ROOT" ] || exit 0
 
-# Derive boot partition: p1 of the same disk
-DISK=$(echo "$ROOT" | sed 's/p[0-9]*$//')
+# Resolve UUID/LABEL/PARTUUID to actual block device path
+# (udev has already populated /dev/disk/by-* by the time local-premount runs)
+resolve_device() {
+    case "$1" in
+        UUID=*)
+            readlink -f "/dev/disk/by-uuid/${1#UUID=}" 2>/dev/null
+            ;;
+        LABEL=*)
+            readlink -f "/dev/disk/by-label/${1#LABEL=}" 2>/dev/null
+            ;;
+        PARTUUID=*)
+            readlink -f "/dev/disk/by-partuuid/${1#PARTUUID=}" 2>/dev/null
+            ;;
+        *)
+            echo "$1"
+            ;;
+    esac
+}
+
+ROOT_DEV=$(resolve_device "$ROOT")
+[ -n "$ROOT_DEV" ] || exit 0
+
+# Derive boot partition: p1 of the same disk (e.g. /dev/mmcblk0p3 -> /dev/mmcblk0p1)
+DISK=$(echo "$ROOT_DEV" | sed 's/p[0-9]*$//')
 BOOT_DEV="${DISK}p1"
 
 # Mount /boot temporarily
 mkdir -p /boot_mnt
 if ! mount -t auto "$BOOT_DEV" /boot_mnt 2>/dev/null; then
+    log_failure_msg "deploy-rootfs: cannot mount boot partition $BOOT_DEV"
     exit 0
 fi
 
@@ -31,18 +54,18 @@ if [ ! -f /boot_mnt/rootfs-pending.tar.gz ]; then
     exit 0
 fi
 
-log_begin_msg "deploy-rootfs: deploying staged rootfs to $ROOT"
+log_begin_msg "deploy-rootfs: deploying staged rootfs to $ROOT_DEV"
 
 # Format root partition (clean slate)
-if ! mke2fs -t ext4 -q -F "$ROOT" 2>/dev/null; then
-    log_failure_msg "deploy-rootfs: mkfs.ext4 failed — will retry next boot"
+if ! mke2fs -t ext4 -q -F "$ROOT_DEV" 2>/dev/null; then
+    log_failure_msg "deploy-rootfs: mkfs.ext4 failed on $ROOT_DEV — will retry next boot"
     umount /boot_mnt
     exit 0
 fi
 
 # Mount root, extract tarball
 mkdir -p /rootfs_deploy
-mount -t ext4 "$ROOT" /rootfs_deploy
+mount -t ext4 "$ROOT_DEV" /rootfs_deploy
 
 # Use pipe pattern for busybox compatibility (busybox tar may lack -z)
 gzip -dc /boot_mnt/rootfs-pending.tar.gz | tar xf - -C /rootfs_deploy
