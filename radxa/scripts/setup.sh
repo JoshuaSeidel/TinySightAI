@@ -279,6 +279,7 @@ ok "ap0 virtual AP service created (192.168.4.1/24, wlan0 free for SSH)"
 
 # hostapd — configure but do NOT start (ap0 doesn't exist until reboot)
 if [ -f "$CONFIG_DIR/hostapd.conf" ]; then
+    mkdir -p /etc/hostapd
     install -m 640 "$CONFIG_DIR/hostapd.conf" /etc/hostapd/hostapd.conf
     # Ensure /etc/default/hostapd points at our config file
     if [ -f /etc/default/hostapd ]; then
