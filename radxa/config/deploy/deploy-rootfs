@@ -1,0 +1,60 @@
+#!/bin/sh
+# /etc/initramfs-tools/scripts/local-premount/deploy-rootfs
+#
+# Deploys a staged rootfs tarball BEFORE the root filesystem is mounted.
+# If /boot/rootfs-pending.tar.gz exists: format root partition, extract, boot new rootfs.
+# If extraction fails: tarball stays, auto-retries on next boot.
+# Safe: live root is never modified; deploy happens on a freshly formatted partition.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+
+. /scripts/functions
+
+# $ROOT is set by initramfs-tools (e.g. /dev/mmcblk0p3)
+[ -n "$ROOT" ] || exit 0
+
+# Derive boot partition: p1 of the same disk
+DISK=$(echo "$ROOT" | sed 's/p[0-9]*$//')
+BOOT_DEV="${DISK}p1"
+
+# Mount /boot temporarily
+mkdir -p /boot_mnt
+if ! mount -t auto "$BOOT_DEV" /boot_mnt 2>/dev/null; then
+    exit 0
+fi
+
+# Check for pending deploy
+if [ ! -f /boot_mnt/rootfs-pending.tar.gz ]; then
+    umount /boot_mnt
+    exit 0
+fi
+
+log_begin_msg "deploy-rootfs: deploying staged rootfs to $ROOT"
+
+# Format root partition (clean slate)
+if ! mke2fs -t ext4 -q -F "$ROOT" 2>/dev/null; then
+    log_failure_msg "deploy-rootfs: mkfs.ext4 failed — will retry next boot"
+    umount /boot_mnt
+    exit 0
+fi
+
+# Mount root, extract tarball
+mkdir -p /rootfs_deploy
+mount -t ext4 "$ROOT" /rootfs_deploy
+
+tar xzf /boot_mnt/rootfs-pending.tar.gz -C /rootfs_deploy
+TAR_RC=$?
+
+umount /rootfs_deploy
+
+if [ $TAR_RC -eq 0 ]; then
+    # Success — rename so we don't re-deploy on next boot
+    mv /boot_mnt/rootfs-pending.tar.gz /boot_mnt/rootfs-deployed.tar.gz
+    log_end_msg
+else
+    log_failure_msg "deploy-rootfs: tar extract failed (rc=$TAR_RC) — will retry next boot"
+fi
+
+umount /boot_mnt

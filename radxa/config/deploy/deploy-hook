@@ -1,0 +1,14 @@
+#!/bin/sh
+# /etc/initramfs-tools/hooks/deploy-rootfs
+#
+# Initramfs hook: include mke2fs so deploy-rootfs can format the root partition.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0;; esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# mke2fs is needed to format the root partition before extracting the tarball.
+# copy_exec also pulls in all shared library dependencies automatically.
+copy_exec /sbin/mke2fs /sbin

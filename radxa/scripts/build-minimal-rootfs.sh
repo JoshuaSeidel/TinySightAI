@@ -10,12 +10,11 @@
 #   2. setup.sh has already been run (all binaries compiled)
 #   3. At least 512MB free RAM (for tmpfs build area)
 #
-# Usage: sudo bash build-minimal-rootfs.sh [--dry-run | --no-deploy]
+# Usage: sudo bash build-minimal-rootfs.sh [--dry-run]
 #
 # Options:
 #   --dry-run     Show what would happen, don't actually build
-#   --no-deploy   Build the rootfs but don't deploy (stays at /mnt/newroot)
-#   (default)     Build AND deploy — rsync over / then force reboot via sysrq
+#   (default)     Build rootfs, verify, stage tarball on /boot, user reboots to deploy
 #
 # What this does:
 #   1. Creates minimal Debian rootfs via debootstrap
@@ -24,7 +23,14 @@
 #   4. Installs our pre-built binaries and configs
 #   5. Creates radxa user, copies SSH keys + WiFi profiles
 #   6. Applies read-only root + overlayfs hardening
-#   7. Deploys over live system via rsync + force reboot
+#   7. Verifies critical binaries, packs tarball to /boot
+#   8. Installs initramfs deploy script — reboot deploys automatically
+#
+# Safe deployment:
+#   - Live system is NEVER modified during build
+#   - Deploy happens in initramfs before root is mounted
+#   - If deploy fails: auto-retries on next boot (tarball stays on /boot)
+#   - Recovery: mount SD on PC, run /boot/recover.sh /dev/sdX3
 # =============================================================================
 
 set -euo pipefail
@@ -589,78 +595,119 @@ chroot "$NEWROOT" systemctl enable initramfs-rebuild 2>/dev/null || true
 ok "Overlay scripts installed (initramfs will rebuild on first boot)"
 
 # ---------------------------------------------------------------------------
-# Step 9: Deploy minimal rootfs
+# Step 9: Verify new rootfs
 # ---------------------------------------------------------------------------
-step "[9/9] Deploying minimal rootfs..."
+step "[9/11] Verifying new rootfs..."
 
-# Show size comparison
 echo ""
 echo "  Current rootfs: $(du -sh / --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/mnt 2>/dev/null | cut -f1)"
 echo "  New rootfs:     $(du -sh "$NEWROOT" | cut -f1)"
 echo "  Packages:       $(chroot "$NEWROOT" dpkg --list | grep '^ii' | wc -l)"
 echo ""
 
-# Safety: back up current rootfs manifest
-dpkg --list > /tmp/old-rootfs-packages.txt 2>/dev/null || true
+VERIFY_FAIL=0
+for f in /usr/sbin/sshd /bin/systemd /sbin/init \
+         /usr/sbin/NetworkManager /sbin/wpa_supplicant \
+         /usr/bin/hostapd /usr/sbin/dnsmasq; do
+    if [ -f "$NEWROOT$f" ]; then
+        ok "Found: $f"
+    else
+        fail "Missing critical binary: $f"
+        VERIFY_FAIL=1
+    fi
+done
 
-if [ "${1:-}" = "--no-deploy" ]; then
-    ok "Minimal rootfs built at $NEWROOT (--no-deploy: skipping deployment)"
-    echo ""
-    echo "To deploy manually later:"
-    echo "  sudo bash $0 --deploy-only"
-    echo ""
-    # Unmount will happen via trap
-    exit 0
+# Check kernel modules
+KERN_VER="$(uname -r)"
+if [ -d "$NEWROOT/lib/modules/$KERN_VER" ]; then
+    ok "Found: kernel modules for $KERN_VER"
+else
+    fail "Missing kernel modules for $KERN_VER"
+    VERIFY_FAIL=1
 fi
 
-echo ""
-echo -e "${YLW}WARNING: About to replace the current rootfs and force reboot.${RST}"
-echo -e "${YLW}The system will rsync the new rootfs over / and immediately reboot.${RST}"
-echo ""
-echo "Press Ctrl-C within 10 seconds to abort..."
-sleep 10
+# Check fstab
+if [ -f "$NEWROOT/etc/fstab" ]; then
+    ok "Found: /etc/fstab"
+else
+    fail "Missing /etc/fstab"
+    VERIFY_FAIL=1
+fi
 
-echo ""
-step "Deploying via rsync..."
+if [ $VERIFY_FAIL -ne 0 ]; then
+    fail "Verification failed — aborting (live system untouched)"
+    exit 1
+fi
+ok "All critical binaries and configs verified"
 
-# Unmount chroot bind mounts before rsync (avoid copying /proc etc from chroot)
+# ---------------------------------------------------------------------------
+# Step 10: Pack rootfs tarball to /boot
+# ---------------------------------------------------------------------------
+step "[10/11] Packing rootfs tarball to /boot..."
+
+# Unmount chroot bind mounts first (avoid packing /proc etc)
 cleanup_mounts
 
-# rsync the new rootfs over the live system
-# NO --delete: rmdir on mount points hangs the kernel. Stale files are harmless;
-# the new rootfs has everything needed and we sysrq-reboot immediately after.
-# Exclude: virtual filesystems, build area, boot partition, build tools, swap
-"$NEWROOT/usr/bin/rsync" -aAX "$NEWROOT/" / \
-    --exclude=/proc \
-    --exclude=/sys \
-    --exclude=/dev \
-    --exclude=/run \
-    --exclude=/mnt \
-    --exclude=/boot \
-    --exclude=/data \
-    --exclude=/tmp \
-    --exclude=/swapfile \
-    --exclude=/home/radxa/TinySightAI \
-    --exclude=/root/.cargo \
-    --exclude=/root/.rustup \
-    2>&1
-if [ $? -ne 0 ]; then
-    fail "rsync failed — new rootfs was NOT deployed"
+# Check /boot free space (values in 1K blocks)
+BOOT_FREE=$(df --output=avail /boot | tail -1 | tr -d ' ')
+NEWROOT_SIZE=$(du -s "$NEWROOT" | cut -f1)
+# Conservative estimate: compressed tarball ~50% of source
+ESTIMATED_GZ=$((NEWROOT_SIZE * 50 / 100))
+
+echo "  New rootfs size:     $((NEWROOT_SIZE / 1024)) MB"
+echo "  Estimated tarball:   $((ESTIMATED_GZ / 1024)) MB"
+echo "  /boot free space:    $((BOOT_FREE / 1024)) MB"
+
+if [ "$BOOT_FREE" -lt "$ESTIMATED_GZ" ]; then
+    fail "Not enough space on /boot (need ~$((ESTIMATED_GZ / 1024))MB, have $((BOOT_FREE / 1024))MB)"
     exit 1
 fi
 
-ok "rsync complete"
+# Remove any previous staged tarball
+rm -f /boot/rootfs-pending.tar.gz
 
-# Force immediate reboot via kernel sysrq
-# This bypasses userspace entirely — no reliance on replaced binaries
+echo "  Packing tarball (this may take a minute)..."
+tar czf /boot/rootfs-pending.tar.gz -C "$NEWROOT" .
+
+TARBALL_SIZE=$(du -h /boot/rootfs-pending.tar.gz | cut -f1)
+ok "Tarball created: /boot/rootfs-pending.tar.gz ($TARBALL_SIZE)"
+
+# ---------------------------------------------------------------------------
+# Step 11: Install initramfs deploy scripts
+# ---------------------------------------------------------------------------
+step "[11/11] Installing initramfs deploy scripts..."
+
+# Install deploy scripts into LIVE system's initramfs directories
+mkdir -p /etc/initramfs-tools/scripts/local-premount
+mkdir -p /etc/initramfs-tools/hooks
+
+cp "$CONFIG_DIR/deploy/deploy-rootfs" \
+   /etc/initramfs-tools/scripts/local-premount/deploy-rootfs
+chmod 755 /etc/initramfs-tools/scripts/local-premount/deploy-rootfs
+
+cp "$CONFIG_DIR/deploy/deploy-hook" \
+   /etc/initramfs-tools/hooks/deploy-rootfs
+chmod 755 /etc/initramfs-tools/hooks/deploy-rootfs
+ok "Deploy scripts installed into initramfs"
+
+# Copy recovery script to /boot
+cp "$CONFIG_DIR/deploy/recover.sh" /boot/recover.sh
+chmod 755 /boot/recover.sh
+ok "Recovery script copied to /boot/recover.sh"
+
+# Rebuild initramfs on the LIVE system to include deploy scripts
+echo "  Rebuilding initramfs (this includes mke2fs for deployment)..."
+update-initramfs -u 2>&1 | tail -2
+ok "Initramfs rebuilt with deploy scripts"
+
 echo ""
-echo "Syncing disks and force-rebooting via sysrq..."
-sync
-sleep 1
-echo s > /proc/sysrq-trigger  # sync all filesystems
-sleep 2
-echo b > /proc/sysrq-trigger  # immediate reboot
-
-# Should never reach here, but just in case
-sleep 5
-reboot -f 2>/dev/null || true
+echo -e "${GRN}================================================================${RST}"
+echo -e "${GRN}  Rootfs built, verified, and staged on /boot.${RST}"
+echo -e "${GRN}  Live system is UNTOUCHED.${RST}"
+echo ""
+echo -e "  To deploy: ${CYN}sudo reboot${RST}"
+echo -e "  The new rootfs deploys automatically during boot."
+echo ""
+echo -e "  If boot fails, mount SD card on a PC and run:"
+echo -e "    ${CYN}sudo bash /boot/recover.sh /dev/sdX3${RST}"
+echo -e "${GRN}================================================================${RST}"
